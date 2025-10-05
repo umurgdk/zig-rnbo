@@ -2,6 +2,10 @@
     .name = .feedback_synth,
     .version = "0.0.1",
     .minimum_zig_version = "0.15.1",
+    .dependencies = .{
+        .jni = .{ .path = "libs/zig-jni" },
+        .android = .{ .path = "libs/zig-android" },
+    },
     .paths = .{""},
     .fingerprint = 0xb0b5a8c3000d3003,
 }
