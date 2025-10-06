@@ -3,7 +3,6 @@
     .version = "0.0.1",
     .minimum_zig_version = "0.15.1",
     .dependencies = .{
-        .jni = .{ .path = "libs/zig-jni" },
         .android = .{ .path = "libs/zig-android" },
     },
     .paths = .{""},

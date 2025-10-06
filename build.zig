@@ -1,11 +1,12 @@
 const std = @import("std");
-const LazyPath = std.Build.LazyPath;
 
+const LazyPath = std.Build.LazyPath;
 const ResolvedTarget = std.Build.ResolvedTarget;
 const OptimizeMode = std.builtin.OptimizeMode;
 const Build = std.Build;
 
 pub const Artifact = enum {
+    rnbo_lib,
     loader_jni,
     zig_module,
 };
@@ -18,6 +19,83 @@ pub fn build(b: *Build) void {
     switch (artifact) {
         .loader_jni => buildLoaderJni(b, target, optimize),
         .zig_module => buildZigLibrary(b, target, optimize),
+        .rnbo_lib => buildRnboLibrary(b, target, optimize),
+    }
+}
+
+fn buildRnboLibrary(b: *Build, target: ResolvedTarget, optimize: OptimizeMode) void {
+    const ndk_sysroot_option = b.option([]const u8, "ndk_sysroot", "Android NDK sysroot");
+    const rnbo_export = b.option(LazyPath, "rnbo_export", "RNBO export path (default: export)") orelse b.path("export");
+
+    const rnbo_class_name = b.option([]const u8, "rnbo_class_name", "RNBO export class name (default: rnbo_source.cpp)") orelse "rnbo_source.cpp";
+    const rnbo_library_name = b.option([]const u8, "library_name", "name of the rnbo library to be built (default: rnbo)") orelse "rnbo";
+
+    const rnbo_module = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .sanitize_c = false,
+    });
+
+    const c_files = [_]LazyPath{
+        b.path("src/rnbo_export.cpp"),
+        rnbo_export.path(b, rnbo_class_name),
+        rnbo_export.path(b, "rnbo/RNBO.cpp"),
+    };
+
+    for (&c_files) |path| {
+        rnbo_module.addCSourceFile(.{
+            .file = path,
+            .flags = &.{ "-std=c++11", "-DANDROID" },
+            .language = .cpp,
+        });
+    }
+
+    rnbo_module.addIncludePath(rnbo_export.path(b, "rnbo"));
+    rnbo_module.addIncludePath(rnbo_export.path(b, "rnbo/common"));
+
+    const rnbo_library = b.addLibrary(.{
+        .name = rnbo_library_name,
+        .linkage = .dynamic,
+        .root_module = rnbo_module,
+    });
+
+    if (target.result.abi.isAndroid()) {
+        const android = @import("android");
+        const ndk_sysroot = ndk_sysroot_option orelse {
+            return b.default_step.dependOn(&b.addFail("-Dndk_sysroot parameter missing").step);
+        };
+
+        const libc_conf = android.createLibCConf(b, target, ndk_sysroot) catch {
+            b.default_step.dependOn(&b.addFail("failed to create libc.conf file").step);
+            return;
+        };
+
+        rnbo_module.link_libc = true;
+        rnbo_module.link_libcpp = true;
+        rnbo_library.step.dependOn(libc_conf.step);
+        rnbo_library.libc_file = libc_conf.path;
+        rnbo_library.link_emit_relocs = true;
+        rnbo_library.link_eh_frame_hdr = true;
+        rnbo_library.link_function_sections = true;
+        rnbo_library.bundle_compiler_rt = true;
+        rnbo_library.export_table = true;
+
+        android.addNdkSysrootPaths(b, target, ndk_sysroot, rnbo_module);
+
+        const arch_name = switch (target.result.cpu.arch) {
+            .aarch64 => "arm64-v8a",
+            else => @tagName(target.result.cpu.arch),
+        };
+
+        const install_lib = b.addInstallArtifact(rnbo_library, .{
+            .dest_dir = .{
+                .override = .{ .custom = arch_name },
+            },
+        });
+
+        b.getInstallStep().dependOn(&install_lib.step);
+    } else {
+        b.installArtifact(rnbo_library);
     }
 }
 
@@ -26,19 +104,26 @@ fn buildLoaderJni(b: *Build, target: ResolvedTarget, optimize: OptimizeMode) voi
         return b.default_step.dependOn(&b.addFail("-Dndk_sysroot parameter missing").step);
     };
 
+    const java_package_name = b.option([]const u8, "java_package", "JNI export java package name") orelse {
+        return b.default_step.dependOn(&b.addFail("-Djava_package missing").step);
+    };
+
     const android_dep = b.lazyDependency("android", .{
         .target = target,
         .optimize = optimize,
         .ndk_sysroot = ndk_sysroot,
     }) orelse return;
 
+    const android = @import("android");
+
     const options = b.addOptions();
-    options.addOption([]const u8, "java_package", ".JAVA_PACKAGE_OPTION_MISSING.");
+    options.addOption([]const u8, "java_package", java_package_name);
 
     const module = b.createModule(.{
         .target = target,
         .optimize = optimize,
         .root_source_file = b.path("src/loader_jni.zig"),
+        .link_libc = true,
         .imports = &.{
             .{ .name = "android", .module = android_dep.module("android") },
         },
@@ -46,13 +131,29 @@ fn buildLoaderJni(b: *Build, target: ResolvedTarget, optimize: OptimizeMode) voi
 
     module.addOptions("options", options);
 
+    const libc_conf = android.createLibCConf(b, target, ndk_sysroot) catch @panic("libc.conf creation failed");
+
     const library = b.addLibrary(.{
         .name = "rnbo_loader",
         .root_module = module,
         .linkage = .dynamic,
     });
 
-    b.installArtifact(library);
+    library.step.dependOn(libc_conf.step);
+    library.libc_file = libc_conf.path;
+
+    const arch_name = switch (target.result.cpu.arch) {
+        .aarch64 => "arm64-v8a",
+        else => @tagName(target.result.cpu.arch),
+    };
+
+    const install_lib = b.addInstallArtifact(library, .{
+        .dest_dir = .{
+            .override = .{ .custom = arch_name },
+        },
+    });
+
+    b.getInstallStep().dependOn(&install_lib.step);
 }
 
 fn buildZigLibrary(b: *Build, target: ResolvedTarget, optimize: OptimizeMode) void {

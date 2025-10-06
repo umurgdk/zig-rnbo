@@ -15,7 +15,7 @@ pub const Functions = extern struct {
     objectNew: *const fn () callconv(.c) *Object,
     objectInitialize: *const fn (obj: *Object) callconv(.c) void,
     objectDestroy: *const fn (obj: *Object) callconv(.c) void,
-    objectPrepareToProcess: *const fn (obj: *Object) callconv(.c) void,
+    objectPrepareToProcess: *const fn (obj: *Object, sample_rate: usize, buffer_frames: usize) callconv(.c) void,
     objectSetPreset: *const fn (obj: *Object, preset: *Preset) callconv(.c) void,
     objectScheduleMidiEvent: *const fn (obj: *Object, time_ms: f64, port: usize, data: [*c]const u8, data_len: usize) callconv(.c) void,
     objectProcess: *const fn (obj: *Object, inputs: [*c]const [*c]f64, inputs_len: usize, outputs: [*c]const [*c]f64, outputs_len: usize, num_frames: usize) callconv(.c) void,
@@ -29,12 +29,26 @@ pub const Functions = extern struct {
 
     presetListFromMemory: *const fn (data: [*c]const u8) callconv(.c) *PresetList,
     presetListDestroy: *const fn (self: *PresetList) callconv(.c) void,
-    presetListPresetWithName: *const fn (self: *PresetList, name: [*c]const u8) *Preset,
+    presetListPresetWithName: *const fn (self: *PresetList, name: [*c]const u8) callconv(.c) *Preset,
 };
 
 pub fn loadLibrary(path: [:0]const u8) !Library {
-    _ = path;
-    @panic("TODO");
+    var handle = try std.DynLib.openZ(path);
+
+    var functions: Functions = undefined;
+    const lookup_fields = std.meta.fields(Functions);
+    inline for (lookup_fields) |field| {
+        @field(functions, field.name) = handle.lookup(field.type, "rnbo_" ++ field.name) orelse {
+            std.log.err("library ({s}): {s}", .{ path, std.c.dlerror() orelse "" });
+            return error.RnboLibraryMissingSymbol;
+        };
+    }
+
+    return Library{
+        .handle = handle,
+        .functions = functions,
+        .timestamp = 0,
+    };
 }
 
 pub const Object = opaque {};
