@@ -20,7 +20,7 @@ typedef enum {
 typedef struct {
 	unsigned int tag;
 	unsigned int channels;
-	double samplerate;
+	RNBO::number samplerate;
 } rnbo_BufferType;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -63,9 +63,16 @@ void rnbo_objectScheduleMidiEvent(CoreObjectRef obj, double time_ms, size_t port
 	object->scheduleEvent(RNBO::MidiEvent(time_ms, port, data, data_len));
 }
 
-void rnbo_objectProcess(CoreObjectRef obj, double * const * inputs, size_t inputs_len, double **outputs, size_t outputs_len, size_t num_frames) {
+void rnbo_objectProcess(CoreObjectRef obj, RNBO::SampleValue * const * inputs, size_t inputs_len, RNBO::SampleValue **outputs, size_t outputs_len, size_t num_frames) {
 	RNBO::CoreObject *object = static_cast<RNBO::CoreObject *>(obj);
 	object->process(inputs, inputs_len, outputs, outputs_len, num_frames);
+}
+
+
+void rnbo_objectProcessInterleaved(CoreObjectRef obj, RNBO::SampleValue *input, size_t input_channels, RNBO::SampleValue * const output, size_t output_channels, size_t num_frames) {
+	RNBO::CoreObject *object = static_cast<RNBO::CoreObject *>(obj);
+	RNBO::SampleValue const *input_ptr = static_cast<RNBO::SampleValue const *>(input);
+	object->process<RNBO::SampleValue const *, RNBO::SampleValue * const>(input_ptr, input_channels, output, output_channels, num_frames);
 }
 
 int rnbo_objectGetParameterIndexForId(CoreObjectRef obj, const char *id) {
@@ -74,18 +81,18 @@ int rnbo_objectGetParameterIndexForId(CoreObjectRef obj, const char *id) {
 	return result;
 }
 
-double rnbo_objectGetParameterValue(CoreObjectRef obj, int parameter_index) {
+RNBO::number rnbo_objectGetParameterValue(CoreObjectRef obj, int parameter_index) {
 	RNBO::CoreObject *object = static_cast<RNBO::CoreObject *>(obj);
-	double result = object->getParameterValue(parameter_index);
+	RNBO::number result = object->getParameterValue(parameter_index);
 	return result;
 }
 
-void rnbo_objectSetParameterValue(CoreObjectRef obj, int parameter_index, double value) {
+void rnbo_objectSetParameterValue(CoreObjectRef obj, int parameter_index, RNBO::number value) {
 	RNBO::CoreObject *object = static_cast<RNBO::CoreObject *>(obj);
 	object->setParameterValue(parameter_index, value);
 }
 
-void rnbo_objectSetParameterValueTime(CoreObjectRef obj, int parameter_index, double value, double time) {
+void rnbo_objectSetParameterValueTime(CoreObjectRef obj, int parameter_index, RNBO::number value, double time) {
 	RNBO::CoreObject *object = static_cast<RNBO::CoreObject *>(obj);
 	object->setParameterValue(parameter_index, value, time);
 }

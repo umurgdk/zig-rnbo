@@ -1,5 +1,9 @@
 const std = @import("std");
 const types = @import("types.zig");
+const options = @import("options");
+
+const Number = if (options.use_f32) f32 else f64;
+const SampleType = if (options.use_f32) f32 else f64;
 
 pub const ParameterIndex = types.ParameterIndex;
 pub const BufferType = types.BufferType;
@@ -16,14 +20,15 @@ pub const Functions = extern struct {
     objectInitialize: *const fn (obj: *Object) callconv(.c) void,
     objectDestroy: *const fn (obj: *Object) callconv(.c) void,
     objectPrepareToProcess: *const fn (obj: *Object, sample_rate: usize, buffer_frames: usize) callconv(.c) void,
+    objectProcess: *const fn (obj: *Object, inputs: [*c]const [*c]SampleType, inputs_len: usize, outputs: [*c]const [*c]SampleType, outputs_len: usize, num_frames: usize) callconv(.c) void,
+    objectProcessInterleaved: *const fn (obj: *Object, input: [*c]SampleType, input_channels: usize, output: [*c]SampleType, output_channels: usize, num_frames: usize) callconv(.c) void,
     objectSetPreset: *const fn (obj: *Object, preset: *Preset) callconv(.c) void,
     objectScheduleMidiEvent: *const fn (obj: *Object, time_ms: f64, port: usize, data: [*c]const u8, data_len: usize) callconv(.c) void,
-    objectProcess: *const fn (obj: *Object, inputs: [*c]const [*c]f64, inputs_len: usize, outputs: [*c]const [*c]f64, outputs_len: usize, num_frames: usize) callconv(.c) void,
 
     objectGetParameterIndexForId: *const fn (obj: *Object, id: [*c]const u8) callconv(.c) ParameterIndex,
-    objectGetParameterValue: *const fn (obj: *Object, parameter_index: ParameterIndex) callconv(.c) f64,
-    objectSetParameterValue: *const fn (obj: *Object, parameter_index: ParameterIndex, value: f64) callconv(.c) void,
-    objectSetParameterValueTime: *const fn (obj: *Object, parameter_index: ParameterIndex, value: f64, time_ms: f64) callconv(.c) void,
+    objectGetParameterValue: *const fn (obj: *Object, parameter_index: ParameterIndex) callconv(.c) Number,
+    objectSetParameterValue: *const fn (obj: *Object, parameter_index: ParameterIndex, value: Number) callconv(.c) void,
+    objectSetParameterValueTime: *const fn (obj: *Object, parameter_index: ParameterIndex, value: Number, time_ms: f64) callconv(.c) void,
 
     objectSetExternalData: *const fn (obj: *Object, id: [*c]const u8, data: [*c]u8, data_size: usize, buffer_type: BufferType, release_cb: ?ExternalDataReleaseCallback) callconv(.c) void,
 
