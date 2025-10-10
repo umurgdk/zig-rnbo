@@ -39,6 +39,7 @@ fn buildRnboLibrary(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, u
         .target = target,
         .optimize = optimize,
         .sanitize_c = false,
+        .strip = true,
     });
 
     const c_files = [_]LazyPath{
@@ -58,12 +59,6 @@ fn buildRnboLibrary(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, u
     rnbo_module.addIncludePath(rnbo_export.path(b, "rnbo"));
     rnbo_module.addIncludePath(rnbo_export.path(b, "rnbo/common"));
 
-    const rnbo_library = b.addLibrary(.{
-        .name = rnbo_library_name,
-        .linkage = .dynamic,
-        .root_module = rnbo_module,
-    });
-
     if (target.result.abi.isAndroid()) {
         const android = @import("android");
         const ndk_sysroot = ndk_sysroot_option orelse {
@@ -75,31 +70,37 @@ fn buildRnboLibrary(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, u
             return;
         };
 
+        const arch_name = switch (target.result.cpu.arch) {
+            .aarch64 => "aarch64",
+            else => @tagName(target.result.cpu.arch),
+        };
+
+        const rnbo_library = b.addLibrary(.{
+            .name = b.fmt("{s}.{s}", .{ rnbo_library_name, arch_name }),
+            .linkage = .dynamic,
+            .root_module = rnbo_module,
+        });
+
         rnbo_module.link_libc = true;
         rnbo_module.link_libcpp = true;
         rnbo_library.step.dependOn(libc_conf.step);
         rnbo_library.libc_file = libc_conf.path;
-        rnbo_library.link_emit_relocs = true;
-        rnbo_library.link_eh_frame_hdr = true;
-        rnbo_library.link_function_sections = true;
-        rnbo_library.bundle_compiler_rt = true;
-        rnbo_library.export_table = true;
+        // rnbo_library.link_emit_relocs = true;
+        // rnbo_library.link_eh_frame_hdr = true;
+        // rnbo_library.link_function_sections = true;
+        // rnbo_library.bundle_compiler_rt = true;
+        // rnbo_library.export_table = true;
 
         android.addNdkSysrootPaths(b, target, ndk_sysroot, rnbo_module);
 
-        const arch_name = switch (target.result.cpu.arch) {
-            .aarch64 => "arm64-v8a",
-            else => @tagName(target.result.cpu.arch),
-        };
-
-        const install_lib = b.addInstallArtifact(rnbo_library, .{
-            .dest_dir = .{
-                .override = .{ .custom = arch_name },
-            },
+        b.installArtifact(rnbo_library);
+    } else {
+        const rnbo_library = b.addLibrary(.{
+            .name = rnbo_library_name,
+            .linkage = .dynamic,
+            .root_module = rnbo_module,
         });
 
-        b.getInstallStep().dependOn(&install_lib.step);
-    } else {
         b.installArtifact(rnbo_library);
     }
 }
@@ -126,6 +127,7 @@ fn buildLoaderJni(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, use
         .optimize = optimize,
         .root_source_file = b.path("src/loader_jni.zig"),
         .link_libc = true,
+        .strip = true,
         .imports = &.{
             .{ .name = "android", .module = android_dep.module("android") },
         },
@@ -154,7 +156,7 @@ fn buildLoaderJni(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, use
 
     const install_lib = b.addInstallArtifact(library, .{
         .dest_dir = .{
-            .override = .{ .custom = arch_name },
+            .override = .{ .custom = b.fmt("jniLibs/{s}", .{arch_name}) },
         },
     });
 
