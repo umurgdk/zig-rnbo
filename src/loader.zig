@@ -34,6 +34,7 @@ pub const Functions = extern struct {
 
     presetListFromMemory: *const fn (data: [*c]const u8) callconv(.c) *PresetList,
     presetListDestroy: *const fn (self: *PresetList) callconv(.c) void,
+    presetListPresetAtIndex: *const fn (self: *PresetList, index: usize) callconv(.c) *Preset,
     presetListPresetWithName: *const fn (self: *PresetList, name: [*c]const u8) callconv(.c) *Preset,
 };
 

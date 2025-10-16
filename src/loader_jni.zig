@@ -8,6 +8,7 @@ const jni = android.jni;
 const ErrorCode = std.meta.Int(.unsigned, @bitSizeOf(anyerror));
 const OK: ErrorCode = 0;
 
+const PACKAGE_NAME = options.java_package;
 const LibraryHandle = jni.jlong;
 
 const Number = if (options.use_f32) jni.jfloat else jni.jdouble;
@@ -20,246 +21,148 @@ pub const std_options: std.Options = .{
 };
 
 comptime {
-    jni.exportJNI(options.java_package ++ ".RnboLoader", RnboLoader);
+    jni.exportJNI(RnboLoader.Class.name, RnboLoader);
     jni.exportJNI(options.java_package ++ ".RnboLibrary", RnboLibrary);
     jni.exportJNI(options.java_package ++ ".RnboObject", RnboObject);
+    jni.exportJNI(options.java_package ++ ".RnboPresetList", RnboPresetList);
 }
 
 const allocator = std.heap.smp_allocator;
 
-fn toJniClassName(comptime name: []const u8) [name.len:0]u8 {
-    var new_name: [name.len:0]u8 = undefined;
-    for (name, 0..) |char, i| {
-        if (char == '.') {
-            new_name[i] = '/';
-        } else {
-            new_name[i] = char;
-        }
-    }
-
-    return new_name;
-}
-
 const RnboLoader = struct {
-    pub fn loadLibrary(cenv: *jni.cEnv, _: jni.jclass, path_jstr: jni.jstring) callconv(.c) jni.jobject {
-        const jenv = jni.JNIEnv.warp(cenv);
+    pub const Class = android.defineClass(PACKAGE_NAME ++ ".RnboLoader");
+    pub fn loadLibrary(cenv: *jni.cEnv, _: jni.jclass, path_string: jni.jstring) callconv(.c) jni.jobject {
+        const env = jni.JNIEnv.warp(cenv);
 
         var path_copied = false;
 
-        const path_ptr = jenv.getStringUTFChars(path_jstr, &path_copied);
-        defer jenv.releaseStringUTFChars(path_jstr, path_ptr);
+        const path_ptr = env.getStringUTFChars(path_string, &path_copied);
+        defer env.releaseStringUTFChars(path_string, path_ptr);
 
         const path = path_ptr[0..std.mem.len(path_ptr) :0];
         std.log.debug("loading rnbo library at {s}", .{path});
 
         const library = allocator.create(loader.Library) catch |err| {
-            _ = android.fail(err, @errorReturnTrace(), "failed to allocate memory for Library", .{});
+            _ = android.exception.throwZig(env, err, @errorReturnTrace(), "failed to allocate memory for Library", .{});
             return null;
         };
 
         library.* = loader.loadLibrary(path) catch |err| {
-            _ = android.fail(err, @errorReturnTrace(), "failed to load library at {s}", .{path});
+            _ = android.exception.throwZig(env, err, @errorReturnTrace(), "failed to load library at {s}", .{path});
             allocator.destroy(library);
             return null;
         };
 
-        const library_object = RnboLibrary.construct(jenv, library) catch |err| {
-            _ = android.fail(err, @errorReturnTrace(), "failed to construct RnboLibrary java object", .{});
-            library.handle.close();
-            allocator.destroy(library);
-            return null;
-        };
-
+        const library_object = RnboLibrary.construct(env, library) catch return null;
         return library_object;
     }
 };
 
 const RnboLibrary = struct {
-    pub const class_name = toJniClassName(options.java_package ++ ".RnboLibrary");
+    pub const Class = android.defineClass(PACKAGE_NAME ++ ".RnboLibrary");
 
-    threadlocal var cached_class: jni.jclass = null;
-    threadlocal var cached_constructor: jni.jmethodID = null;
-    threadlocal var cached_handle_fieldid: jni.jfieldID = null;
-
-    pub const ObjectHandle = jni.jlong;
-    pub const PresetListPtr = jni.jlong;
-    pub const PresetPtr = jni.jlong;
-
-    pub fn getClass(env: jni.JNIEnv) !jni.jclass {
-        if (cached_class) |class| return class;
-        const class = env.findClass(&class_name) orelse return error.JavaClassNotFound;
-        cached_class = env.newGlobalRef(class);
-        return class;
-    }
-
-    pub fn getConstructor(env: jni.JNIEnv, class: jni.jclass) !jni.jmethodID {
-        if (cached_constructor) |cons| return cons;
-        const constructor = env.getMethodID(class, "<init>", "(J)V") orelse return error.JavaMethodNotFound;
-        cached_constructor = constructor;
-        return constructor;
-    }
-
-    pub fn getHandleField(env: jni.JNIEnv) !jni.jfieldID {
-        if (cached_handle_fieldid) |fid| return fid;
-        const field_id = env.getFieldID(try getClass(env), "handle", "J") orelse return error.JavaFieldNotFound;
-        cached_handle_fieldid = field_id;
-        return field_id;
-    }
-
-    pub fn handleToPtr(comptime T: type, handle: jni.jlong) *T {
-        const address: usize = @bitCast(handle);
-        return @ptrFromInt(address);
-    }
+    const handle_prop = android.defineInstanceProperty(Class, "handle", jni.jlong);
+    const constructor_method = android.defineMethod(Class, "<init>", void, .{jni.jlong});
 
     fn getLibrary(env: jni.JNIEnv, this: jni.jobject) !*loader.Library {
-        const field_id = try getHandleField(env);
-        const address: usize = @bitCast(env.getField(this, jni.jlong, field_id));
-        return @ptrFromInt(address);
+        const handle = try handle_prop.get(env, this);
+        const address: usize = @bitCast(handle);
+        const library: *loader.Library = @ptrFromInt(address);
+        return library;
     }
 
     pub fn construct(env: jni.JNIEnv, library: *loader.Library) !jni.jobject {
-        const handle: jni.jlong = @bitCast(@intFromPtr(library));
-        const class = try getClass(env);
-        const constructor = try getConstructor(env, class);
-        const object = env.newObject(class, constructor, &jni.toJValues(handle));
-        return object;
+        const class = try Class.get(env);
+        const constructor = try constructor_method.getMethodId(env);
+        const lib_address: usize = @intFromPtr(library);
+        const lib_handle: jni.jlong = @bitCast(lib_address);
+
+        const instance = env.newObject(class, constructor, &jni.toJValues(lib_handle));
+        return instance;
     }
 
     pub fn newObject(cenv: *jni.cEnv, this: jni.jobject) callconv(.c) jni.jobject {
         const env = jni.JNIEnv.warp(cenv);
-        const library = getLibrary(env, this) catch |err| {
-            _ = android.fail(err, @errorReturnTrace(), "couldn't get library", .{});
-            return null;
-        };
+        const library = getLibrary(env, this) catch return null;
 
         const object = library.functions.objectNew();
-        const object_instance = RnboObject.construct(env, this, object) catch |err| {
-            _ = android.fail(err, @errorReturnTrace(), "failed to construct RnboLibrary java object", .{});
-            return null;
-        };
+        const object_instance = RnboObject.construct(env, this, object) catch return null;
 
         return object_instance;
+    }
+
+    pub fn loadPresetListFromMemory(cenv: *jni.cEnv, this: jni.jobject, byte_buffer: jni.jobject) callconv(.c) jni.jobject {
+        const env = jni.JNIEnv.warp(cenv);
+        const library = getLibrary(env, this) catch return null;
+
+        const buff_addr = env.getDirectBufferAddress(byte_buffer);
+        const buff_ptr: [*]u8 = @ptrFromInt(buff_addr);
+
+        const preset_list = library.functions.presetListFromMemory(buff_ptr);
+        const preset_list_object = RnboPresetList.construct(env, this, preset_list) catch return null;
+        return preset_list_object;
     }
 };
 
 const RnboObject = struct {
-    pub const class_name = toJniClassName(options.java_package ++ ".RnboObject");
+    pub const Class = android.defineClass(PACKAGE_NAME ++ ".RnboObject");
 
-    threadlocal var cached_class: jni.jclass = null;
-    threadlocal var cached_constructor: jni.jmethodID = null;
-    threadlocal var cached_library_fieldid: jni.jfieldID = null;
-    threadlocal var cached_objhandle_fieldid: jni.jfieldID = null;
+    const library_prop = android.defineInstanceProperty(Class, "library", RnboLibrary.Class);
+    const handle_prop = android.defineInstanceProperty(Class, "handle", jni.jlong);
 
-    pub fn getClass(env: jni.JNIEnv) !jni.jclass {
-        if (cached_class) |class| return class;
-        const class = env.findClass(&class_name) orelse return error.JavaClassNotFound;
-        cached_class = env.newGlobalRef(class);
-        return class;
-    }
-
-    pub fn getConstructor(env: jni.JNIEnv, class: jni.jclass) !jni.jmethodID {
-        if (cached_constructor) |cons| return cons;
-        const constructor = env.getMethodID(class, "<init>", "(L" ++ RnboLibrary.class_name ++ ";J)V") orelse return error.JavaMethodNotFound;
-        cached_constructor = constructor;
-        return constructor;
-    }
-
-    pub fn getObjectHandleField(env: jni.JNIEnv) !jni.jfieldID {
-        if (cached_objhandle_fieldid) |fid| return fid;
-        const field_id = env.getFieldID(try getClass(env), "handle", "J") orelse return error.JavaFieldNotFound;
-        cached_objhandle_fieldid = field_id;
-        return field_id;
-    }
-
-    pub fn getLibraryField(env: jni.JNIEnv) !jni.jfieldID {
-        if (cached_library_fieldid) |fid| return fid;
-        const field_id = env.getFieldID(try getClass(env), "library", "L" ++ RnboLibrary.class_name ++ ";") orelse return error.JavaFieldNotFound;
-        cached_library_fieldid = field_id;
-        return field_id;
-    }
-
-    pub fn handleToPtr(comptime T: type, handle: jni.jlong) *T {
-        const address: usize = @bitCast(handle);
-        return @ptrFromInt(address);
-    }
+    const constructor_method = android.defineMethod(Class, "<init>", void, .{ RnboLibrary.Class, jni.jlong });
 
     pub fn getLibrary(env: jni.JNIEnv, this: jni.jobject) !*loader.Library {
-        const field_id = try getLibraryField(env);
-        const library_jobject = env.getField(this, jni.jobject, field_id);
-        const library = try RnboLibrary.getLibrary(env, library_jobject);
-        return library;
+        const lib_object = try library_prop.get(env, this);
+        return RnboLibrary.getLibrary(env, lib_object);
     }
 
     pub fn getObject(env: jni.JNIEnv, this: jni.jobject) !*loader.Object {
-        const field_id = try getObjectHandleField(env);
-        const handle = env.getField(this, jni.jlong, field_id);
-        const address: usize = @bitCast(handle);
-        return @ptrFromInt(address);
-    }
-
-    pub fn construct(env: jni.JNIEnv, library: jni.jobject, rnbo_object: *loader.Object) !jni.jobject {
-        const class = try getClass(env);
-        const constructor = try getConstructor(env, class);
-        const handle: jni.jlong = @bitCast(@intFromPtr(rnbo_object));
-        const object = env.newObject(class, constructor, &jni.toJValues(.{ library, handle }));
+        const obj_handle = try handle_prop.get(env, this);
+        const obj_address: usize = @bitCast(obj_handle);
+        const object: *loader.Object = @ptrFromInt(obj_address);
         return object;
     }
 
-    pub fn initialize(cenv: *jni.cEnv, this: jni.jobject) callconv(.c) ErrorCode {
-        const env = jni.JNIEnv.warp(cenv);
-        const library = getLibrary(env, this) catch |err| {
-            return android.fail(err, @errorReturnTrace(), "couldn't get libarary", .{});
-        };
-        const object = getObject(env, this) catch |err| {
-            return android.fail(err, @errorReturnTrace(), "couldn't get rnbo object", .{});
-        };
+    pub fn construct(env: jni.JNIEnv, library_object: jni.jobject, rnbo_object: *loader.Object) !jni.jobject {
+        const class = try Class.get(env);
+        const constructor = try constructor_method.getMethodId(env);
 
+        const object_handle: jni.jlong = @bitCast(@intFromPtr(rnbo_object));
+        const object = env.newObject(class, constructor, &jni.toJValues(.{ library_object, object_handle }));
+        return object;
+    }
+
+    pub fn initialize(cenv: *jni.cEnv, this: jni.jobject) callconv(.c) void {
+        const env = jni.JNIEnv.warp(cenv);
+        const library = getLibrary(env, this) catch return;
+        const object = getObject(env, this) catch return;
         library.functions.objectInitialize(object);
-        return OK;
     }
 
-    pub fn destroy(cenv: *jni.cEnv, this: jni.jobject) callconv(.c) ErrorCode {
+    pub fn destroy(cenv: *jni.cEnv, this: jni.jobject) callconv(.c) void {
         const env = jni.JNIEnv.warp(cenv);
-        const library = getLibrary(env, this) catch |err| {
-            return android.fail(err, @errorReturnTrace(), "couldn't get libarary", .{});
-        };
-        const object = getObject(env, this) catch |err| {
-            return android.fail(err, @errorReturnTrace(), "couldn't get rnbo object", .{});
-        };
-
+        const library = getLibrary(env, this) catch return;
+        const object = getObject(env, this) catch return;
         library.functions.objectDestroy(object);
-        return OK;
     }
 
-    pub fn prepareToProcess(cenv: *jni.cEnv, this: jni.jobject, sample_rate: jni.jlong, buffer_frames: jni.jlong) callconv(.c) ErrorCode {
+    pub fn prepareToProcess(cenv: *jni.cEnv, this: jni.jobject, sample_rate: jni.jlong, buffer_frames: jni.jlong) callconv(.c) void {
         const env = jni.JNIEnv.warp(cenv);
-        const library = getLibrary(env, this) catch |err| {
-            return android.fail(err, @errorReturnTrace(), "couldn't get libarary", .{});
-        };
-        const object = getObject(env, this) catch |err| {
-            return android.fail(err, @errorReturnTrace(), "couldn't get rnbo object", .{});
-        };
+        const library = getLibrary(env, this) catch return;
+        const object = getObject(env, this) catch return;
 
-        library.functions.objectPrepareToProcess(object, @intCast(sample_rate), @intCast(buffer_frames));
-        return OK;
+        library.functions.objectPrepareToProcess(
+            object,
+            @intCast(sample_rate),
+            @intCast(buffer_frames),
+        );
     }
 
-    pub fn setPreset(cenv: *jni.cEnv, this: jni.jobject, preset: jni.jobject) callconv(.c) ErrorCode {
-        _ = cenv; // autofix
-        _ = this; // autofix
-        _ = preset; // autofix
-        std.log.err("RnboObject.setPreset is not implemented yet!", .{});
-        return OK;
-    }
-
-    pub fn process(cenv: *jni.cEnv, this: jni.jobject, output_chan1_arr: SampleArray, output_chan2_arr: SampleArray, num_frames: jni.jlong) callconv(.c) ErrorCode {
+    pub fn process(cenv: *jni.cEnv, this: jni.jobject, output_chan1_arr: SampleArray, output_chan2_arr: SampleArray, num_frames: jni.jlong) callconv(.c) void {
         const env = jni.JNIEnv.warp(cenv);
-        const library = getLibrary(env, this) catch |err| {
-            return android.fail(err, @errorReturnTrace(), "couldn't get libarary", .{});
-        };
-        const object = getObject(env, this) catch |err| {
-            return android.fail(err, @errorReturnTrace(), "couldn't get rnbo object", .{});
-        };
+        const library = getLibrary(env, this) catch return;
+        const object = getObject(env, this) catch return;
 
         var output_chan1_copied = false;
         const output_chan1_ptr = env.getPrimitiveArrayElements(SampleType, output_chan1_arr, &output_chan1_copied);
@@ -273,7 +176,6 @@ const RnboObject = struct {
         const outputs_ptr: [*c]const [*c]SampleType = @ptrCast(&outputs);
 
         library.functions.objectProcess(object, null, 0, outputs_ptr, outputs.len, @intCast(num_frames));
-        return OK;
     }
 
     pub fn processInterleaved(
@@ -284,14 +186,10 @@ const RnboObject = struct {
         output_buff: jni.jobject,
         output_channels: jni.jint,
         num_frames: jni.jlong,
-    ) callconv(.c) ErrorCode {
+    ) callconv(.c) void {
         const env = jni.JNIEnv.warp(cenv);
-        const library = getLibrary(env, this) catch |err| {
-            return android.fail(err, @errorReturnTrace(), "couldn't get libarary", .{});
-        };
-        const object = getObject(env, this) catch |err| {
-            return android.fail(err, @errorReturnTrace(), "couldn't get rnbo object", .{});
-        };
+        const library = getLibrary(env, this) catch return;
+        const object = getObject(env, this) catch return;
 
         var input_ptr: ?[*]SampleType = null;
         var output_ptr: ?[*]SampleType = null;
@@ -314,18 +212,12 @@ const RnboObject = struct {
             @intCast(output_channels),
             @intCast(num_frames),
         );
-
-        return OK;
     }
 
     pub fn getParameterIndexById(cenv: *jni.cEnv, this: jni.jobject, id: jni.jstring) callconv(.c) jni.jint {
         const env = jni.JNIEnv.warp(cenv);
-        const library = getLibrary(env, this) catch |err| {
-            return android.fail(err, @errorReturnTrace(), "couldn't get libarary", .{});
-        };
-        const object = getObject(env, this) catch |err| {
-            return android.fail(err, @errorReturnTrace(), "couldn't get rnbo object", .{});
-        };
+        const library = getLibrary(env, this) catch return 0;
+        const object = getObject(env, this) catch return 0;
 
         var id_copied = false;
         const id_utf = env.getStringUTFChars(id, &id_copied);
@@ -337,53 +229,32 @@ const RnboObject = struct {
 
     pub fn getParameterValue(cenv: *jni.cEnv, this: jni.jobject, param_index: jni.jint) callconv(.c) Number {
         const env = jni.JNIEnv.warp(cenv);
-        const library = getLibrary(env, this) catch |err| {
-            _ = android.fail(err, @errorReturnTrace(), "couldn't get libarary", .{});
-            return 0;
-        };
-        const object = getObject(env, this) catch |err| {
-            _ = android.fail(err, @errorReturnTrace(), "couldn't get rnbo object", .{});
-            return 0;
-        };
+        const library = getLibrary(env, this) catch return 0;
+        const object = getObject(env, this) catch return 0;
 
         const value = library.functions.objectGetParameterValue(object, @intCast(param_index));
         return value;
     }
 
-    pub fn setParameterValue(cenv: *jni.cEnv, this: jni.jobject, param_index: jni.jint, value: Number) callconv(.c) ErrorCode {
+    pub fn setParameterValue(cenv: *jni.cEnv, this: jni.jobject, param_index: jni.jint, value: Number) callconv(.c) void {
         const env = jni.JNIEnv.warp(cenv);
-        const library = getLibrary(env, this) catch |err| {
-            return android.fail(err, @errorReturnTrace(), "couldn't get libarary", .{});
-        };
-        const object = getObject(env, this) catch |err| {
-            return android.fail(err, @errorReturnTrace(), "couldn't get rnbo object", .{});
-        };
+        const library = getLibrary(env, this) catch return;
+        const object = getObject(env, this) catch return;
 
         library.functions.objectSetParameterValue(object, param_index, value);
-        return OK;
     }
 
-    pub fn setParameterValueTime(cenv: *jni.cEnv, this: jni.jobject, param_index: jni.jint, value: Number, time_ms: f64) callconv(.c) ErrorCode {
+    pub fn setParameterValueTime(cenv: *jni.cEnv, this: jni.jobject, param_index: jni.jint, value: Number, time_ms: f64) callconv(.c) void {
         const env = jni.JNIEnv.warp(cenv);
-        const library = getLibrary(env, this) catch |err| {
-            return android.fail(err, @errorReturnTrace(), "couldn't get libarary", .{});
-        };
-        const object = getObject(env, this) catch |err| {
-            return android.fail(err, @errorReturnTrace(), "couldn't get rnbo object", .{});
-        };
-
+        const library = getLibrary(env, this) catch return;
+        const object = getObject(env, this) catch return;
         library.functions.objectSetParameterValueTime(object, param_index, value, time_ms);
-        return OK;
     }
 
-    pub fn setExternalDataNativeMemory(cenv: *jni.cEnv, this: jni.jobject, id: jni.jstring, data_address: jni.jlong, data_size: jni.jlong, buffer_type_tag: jni.jint, buffer_type_channels: jni.jint, buffer_type_samplerate: jni.jlong) callconv(.c) ErrorCode {
+    pub fn setExternalDataNativeMemory(cenv: *jni.cEnv, this: jni.jobject, id: jni.jstring, data_address: jni.jlong, data_size: jni.jlong, buffer_type_tag: jni.jint, buffer_type_channels: jni.jint, buffer_type_samplerate: jni.jlong) callconv(.c) void {
         const env = jni.JNIEnv.warp(cenv);
-        const library = getLibrary(env, this) catch |err| {
-            return android.fail(err, @errorReturnTrace(), "couldn't get libarary", .{});
-        };
-        const object = getObject(env, this) catch |err| {
-            return android.fail(err, @errorReturnTrace(), "couldn't get rnbo object", .{});
-        };
+        const library = getLibrary(env, this) catch return;
+        const object = getObject(env, this) catch return;
 
         const data_ptr: [*]u8 = @ptrFromInt(@as(usize, @bitCast(data_address)));
 
@@ -399,18 +270,12 @@ const RnboObject = struct {
 
         // TODO(umur): Release callback?!?!?!?!
         library.functions.objectSetExternalData(object, id_utf, data_ptr, @intCast(data_size), buffer_type, null);
-
-        return OK;
     }
 
-    pub fn setExternalData(cenv: *jni.cEnv, this: jni.jobject, id: jni.jstring, data_arr: jni.jbyteArray, buffer_type_tag: jni.jint, buffer_type_channels: jni.jint, buffer_type_samplerate: jni.jlong) callconv(.c) ErrorCode {
+    pub fn setExternalData(cenv: *jni.cEnv, this: jni.jobject, id: jni.jstring, data_arr: jni.jbyteArray, buffer_type_tag: jni.jint, buffer_type_channels: jni.jint, buffer_type_samplerate: jni.jlong) callconv(.c) void {
         const env = jni.JNIEnv.warp(cenv);
-        const library = getLibrary(env, this) catch |err| {
-            return android.fail(err, @errorReturnTrace(), "couldn't get libarary", .{});
-        };
-        const object = getObject(env, this) catch |err| {
-            return android.fail(err, @errorReturnTrace(), "couldn't get rnbo object", .{});
-        };
+        const library = getLibrary(env, this) catch return;
+        const object = getObject(env, this) catch return;
 
         var bytes_copied = false;
         const bytes_ptr = env.getPrimitiveArrayElements(jni.jbyte, data_arr, &bytes_copied);
@@ -430,9 +295,99 @@ const RnboObject = struct {
 
         // TODO(umur): Release callback?!?!?!?!
         library.functions.objectSetExternalData(object, id_utf, data_ptr, data_len, buffer_type, null);
+    }
 
-        return OK;
+    pub fn setPreset(cenv: *jni.cEnv, this: jni.jobject, preset_object: jni.jobject) callconv(.c) void {
+        const env = jni.JNIEnv.warp(cenv);
+        const library = getLibrary(env, this) catch return;
+        const object = getObject(env, this) catch return;
+        const preset = RnboPreset.getPreset(env, preset_object) catch return;
+        library.functions.objectSetPreset(object, preset);
     }
 };
 
-const RnboPreset = struct {};
+const RnboPresetList = struct {
+    const Class = android.defineClass(PACKAGE_NAME ++ ".RnboPresetList");
+
+    const library_prop = android.defineInstanceProperty(Class, "library", RnboLibrary.Class);
+    const handle_prop = android.defineInstanceProperty(Class, "handle", jni.jlong);
+
+    const constructor_method = android.defineMethod(Class, "<init>", void, .{ RnboLibrary.Class, jni.jlong });
+
+    pub fn getLibrary(env: jni.JNIEnv, this: jni.jobject) !*loader.Library {
+        const lib_obj = try library_prop.get(env, this);
+        return RnboLibrary.getLibrary(env, lib_obj);
+    }
+
+    pub fn getPresetList(env: jni.JNIEnv, this: jni.jobject) !*loader.PresetList {
+        const handle = try handle_prop.get(env, this);
+        const address: usize = @bitCast(handle);
+        const preset_list: *loader.PresetList = @ptrFromInt(address);
+        return preset_list;
+    }
+
+    pub fn construct(env: jni.JNIEnv, library_object: jni.jobject, preset_list: *loader.PresetList) !jni.jobject {
+        const class = try Class.get(env);
+        const constructor = try constructor_method.getMethodId(env);
+
+        const preset_list_addr = @intFromPtr(preset_list);
+        const preset_list_handle: jni.jlong = @bitCast(preset_list_addr);
+
+        const object = env.newObject(class, constructor, &jni.toJValues(.{ library_object, preset_list_handle }));
+        return object;
+    }
+
+    pub fn destroy(cenv: *jni.cEnv, this: jni.jobject) callconv(.c) void {
+        const env = jni.JNIEnv.warp(cenv);
+        const library = getLibrary(env, this) catch return;
+        const preset_list = getPresetList(env, this) catch return;
+        library.functions.presetListDestroy(preset_list);
+    }
+
+    pub fn presetAtIndex(cenv: *jni.cEnv, this: jni.jobject, index: jni.jint) callconv(.c) jni.jobject {
+        const env = jni.JNIEnv.warp(cenv);
+        const library = getLibrary(env, this) catch return null;
+        const preset_list = getPresetList(env, this) catch return null;
+
+        const preset = library.functions.presetListPresetAtIndex(preset_list, @intCast(index));
+        const preset_object = RnboPreset.construct(env, preset) catch return null;
+        return preset_object;
+    }
+
+    pub fn presetWithName(cenv: *jni.cEnv, this: jni.jobject, name_string: jni.jstring) callconv(.c) jni.jobject {
+        const env = jni.JNIEnv.warp(cenv);
+        const library = getLibrary(env, this) catch return null;
+        const preset_list = getPresetList(env, this) catch return null;
+
+        var chars_copied = false;
+        const name = env.getStringUTFChars(name_string, &chars_copied);
+        defer env.releaseStringUTFChars(name_string, name);
+
+        const preset = library.functions.presetListPresetWithName(preset_list, name);
+        const preset_obj = RnboPreset.construct(env, preset) catch return null;
+        return preset_obj;
+    }
+};
+
+const RnboPreset = struct {
+    const Class = android.defineClass(PACKAGE_NAME ++ ".RnboPreset");
+
+    const handle_prop = android.defineInstanceProperty(Class, "handle", jni.jlong);
+    const constructor_method = android.defineMethod(Class, "<init>", void, .{jni.jlong});
+
+    pub fn getPreset(env: jni.JNIEnv, this: jni.jobject) !*loader.Preset {
+        const preset_handle = try handle_prop.get(env, this);
+        const preset_address: usize = @bitCast(preset_handle);
+        const preset: *loader.Preset = @ptrFromInt(preset_address);
+        return preset;
+    }
+
+    pub fn construct(env: jni.JNIEnv, preset: *loader.Preset) !jni.jobject {
+        const class = try Class.get(env);
+        const constructor = try constructor_method.getMethodId(env);
+        const preset_address = @intFromPtr(preset);
+        const preset_handle: jni.jlong = @bitCast(preset_address);
+        const object = env.newObject(class, constructor, &jni.toJValues(.{preset_handle}));
+        return object;
+    }
+};

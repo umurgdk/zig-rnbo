@@ -2,7 +2,7 @@
 
 #include "RNBO.h"
 
-extern "C" RNBO::PatcherFactoryFunctionPtr GetPatcherFactoryFunction(RNBO::PlatformInterface* platformInterface);
+// extern "C" RNBO::PatcherFactoryFunctionPtr GetPatcherFactoryFunction(RNBO::PlatformInterface* platformInterface);
 
 extern "C" {
 
@@ -29,10 +29,12 @@ typedef struct {
 ///
 
 typedef void * CoreObjectRef;
+typedef void * PresetListRef;
+typedef void * PresetRef;
 
 CoreObjectRef _Nullable rnbo_objectNew() {
-	auto patcher_interface = GetPatcherFactoryFunction(RNBO::Platform::get())();
-	RNBO::CoreObject *object = new RNBO::CoreObject(RNBO::UniquePtr<RNBO::PatcherInterface>(patcher_interface));
+	// auto patcher_interface = GetPatcherFactoryFunction(RNBO::Platform::get())();
+	RNBO::CoreObject *object = new RNBO::CoreObject();
 	return (CoreObjectRef)object;
 }
 
@@ -51,7 +53,7 @@ void rnbo_objectPrepareToProcess(CoreObjectRef obj, size_t sample_rate, size_t c
 	object->prepareToProcess(sample_rate, chunk_size);
 }
 
-void rnbo_objectSetPreset(CoreObjectRef obj, void *preset) {
+void rnbo_objectSetPreset(CoreObjectRef obj, PresetRef preset) {
 	RNBO::CoreObject *object = static_cast<RNBO::CoreObject *>(obj);
 	RNBO::PatcherState *patcher_state = static_cast<RNBO::PatcherState *>(preset);
 	std::unique_ptr<RNBO::PatcherState> p(patcher_state);
@@ -123,17 +125,23 @@ void rnbo_objectSetExternalData(CoreObjectRef obj, const char *id, char *data, s
 /// RNBO::PresetList
 ///
 
-void *rnbo_presetListFromMemory(const char *preset_data) {
+PresetListRef rnbo_presetListFromMemory(const char *preset_data) {
 	RNBO::PresetList *preset_list = new RNBO::PresetList(preset_data);
 	return preset_list;
 }
 
-void rnbo_presetListDestroy(void *preset_list) {
+void rnbo_presetListDestroy(PresetListRef preset_list) {
 	RNBO::PresetList *p = static_cast<RNBO::PresetList *>(preset_list);
 	delete p;
 }
 
-void * rnbo_presetListPresetWithName(void *preset_list, const char *name) {
+PresetRef rnbo_presetListPresetAtIndex(PresetListRef preset_list, size_t index) {
+	RNBO::PresetList *p = static_cast<RNBO::PresetList *>(preset_list);
+	auto preset = p->presetAtIndex(index);
+	return preset.release();
+}
+
+PresetRef rnbo_presetListPresetWithName(PresetListRef preset_list, const char *name) {
 	RNBO::PresetList *p = static_cast<RNBO::PresetList *>(preset_list);
 	auto preset = p->presetWithName(name);
 	return preset.release();
