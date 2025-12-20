@@ -223,7 +223,11 @@ const RnboObject = struct {
         const id_utf = env.getStringUTFChars(id, &id_copied);
         defer env.releaseStringUTFChars(id, id_utf);
 
-        const index = library.functions.objectGetParameterIndexForId(object, id_utf);
+        const index = library.functions.objectGetParameterIndexForId(object, id_utf) catch |err| {
+            android.exception.throwZig(env, err, @errorReturnTrace(), "failed to get paramter index for id: {s}", .{id_utf});
+            return -1;
+        };
+
         return index;
     }
 

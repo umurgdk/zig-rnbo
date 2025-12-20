@@ -78,9 +78,13 @@ void rnbo_objectProcessInterleaved(CoreObjectRef obj, RNBO::SampleValue *input, 
 }
 
 int rnbo_objectGetParameterIndexForId(CoreObjectRef obj, const char *id) {
-	RNBO::CoreObject *object = static_cast<RNBO::CoreObject *>(obj);
-	int result = object->getParameterIndexForID(id);
-	return result;
+	try {
+		RNBO::CoreObject *object = static_cast<RNBO::CoreObject *>(obj);
+		int result = object->getParameterIndexForID(id);
+		return result;
+	} catch(...) {
+		return -1;
+	}
 }
 
 RNBO::number rnbo_objectGetParameterValue(CoreObjectRef obj, int parameter_index) {

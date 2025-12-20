@@ -37,7 +37,15 @@ pub const Object = opaque {
     /// Takes the ownership of the preset, if possible do not use the preset anymore
     pub const setPreset = rnbo_objectSetPreset;
 
-    pub const getParameterIndexForId = rnbo_objectGetParameterIndexForId;
+    pub fn getParameterIndexForId(obj: *Object, id: [*c]const u8) !c_int {
+        const index = rnbo_objectGetParameterIndexForId(obj, id);
+        if (index < 0) {
+            return error.ParameterNotFound;
+        } else {
+            return index;
+        }
+    }
+
     pub const getParameterValue = rnbo_objectGetParameterValue;
     pub const setParameterValue = rnbo_objectSetParameterValue;
     pub const setParameterValueTime = rnbo_objectSetParameterValueTime;
