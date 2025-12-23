@@ -124,6 +124,16 @@ void rnbo_objectSetExternalData(CoreObjectRef obj, const char *id, char *data, s
 	}
 }
 
+bool rnbo_objectSendMessage(CoreObjectRef obj, const char *tag) {
+	RNBO::CoreObject *object = static_cast<RNBO::CoreObject *>(obj);
+	try {
+		object->sendMessage(RNBO::TAG(tag), RNBO::TAG(""));
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 /// 
 /// RNBO::PresetList

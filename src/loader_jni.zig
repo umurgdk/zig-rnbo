@@ -309,6 +309,21 @@ const RnboObject = struct {
         const preset = RnboPreset.getPreset(env, preset_object) catch return;
         library.functions.objectSetPreset(object, preset);
     }
+
+    pub fn sendMessage(cenv: *jni.cEnv, this: jni.jobject, inport: jni.jstring) callconv(.c) void {
+        const env = jni.JNIEnv.warp(cenv);
+        const library = getLibrary(env, this) catch return;
+        const object = getObject(env, this) catch return;
+
+        var inport_bytes_copied = false;
+        const inport_utf = env.getStringUTFChars(inport, &inport_bytes_copied);
+        defer env.releaseStringUTFChars(inport, inport_utf);
+
+        if (!library.functions.objectSendMessage(object, inport_utf)) {
+            android.exception.throw(env, "Failed to send message");
+            return;
+        }
+    }
 };
 
 const RnboPresetList = struct {

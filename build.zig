@@ -154,10 +154,9 @@ fn buildLoaderJni(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, use
         else => @tagName(target.result.cpu.arch),
     };
 
+    const install_path = b.pathJoin(&.{ "jniLibs", arch_name });
     const install_lib = b.addInstallArtifact(library, .{
-        .dest_dir = .{
-            .override = .{ .custom = b.fmt("jniLibs/{s}", .{arch_name}) },
-        },
+        .dest_dir = .{ .override = .{ .custom = install_path } },
     });
 
     b.getInstallStep().dependOn(&install_lib.step);
