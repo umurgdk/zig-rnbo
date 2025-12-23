@@ -21,7 +21,7 @@ pub const Functions = extern struct {
     objectDestroy: *const fn (obj: *Object) callconv(.c) void,
     objectPrepareToProcess: *const fn (obj: *Object, sample_rate: usize, buffer_frames: usize) callconv(.c) void,
     objectProcess: *const fn (obj: *Object, inputs: [*c]const [*c]SampleType, inputs_len: usize, outputs: [*c]const [*c]SampleType, outputs_len: usize, num_frames: usize) callconv(.c) void,
-    objectProcessInterleaved: *const fn (obj: *Object, input: [*c]SampleType, input_channels: usize, output: [*c]SampleType, output_channels: usize, num_frames: usize) callconv(.c) void,
+    objectProcessInterleaved: *const fn (obj: *Object, input: [*c]SampleType, input_channels: usize, output: [*c]SampleType, output_channels: usize, num_frames: usize) callconv(.c) c_int,
     objectSetPreset: *const fn (obj: *Object, preset: *Preset) callconv(.c) void,
     objectScheduleMidiEvent: *const fn (obj: *Object, time_ms: f64, port: usize, data: [*c]const u8, data_len: usize) callconv(.c) void,
 

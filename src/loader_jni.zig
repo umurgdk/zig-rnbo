@@ -204,7 +204,7 @@ const RnboObject = struct {
             output_ptr = @ptrFromInt(output_addr);
         }
 
-        library.functions.objectProcessInterleaved(
+        const result = library.functions.objectProcessInterleaved(
             object,
             input_ptr,
             @intCast(input_channels),
@@ -212,6 +212,10 @@ const RnboObject = struct {
             @intCast(output_channels),
             @intCast(num_frames),
         );
+
+        if (result < 0) {
+            android.exception.throw(env, "RNBO::Object.processInterleaved failed!");
+        }
     }
 
     pub fn getParameterIndexById(cenv: *jni.cEnv, this: jni.jobject, id: jni.jstring) callconv(.c) jni.jint {

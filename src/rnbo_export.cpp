@@ -71,10 +71,14 @@ void rnbo_objectProcess(CoreObjectRef obj, RNBO::SampleValue * const * inputs, s
 }
 
 
-void rnbo_objectProcessInterleaved(CoreObjectRef obj, RNBO::SampleValue *input, size_t input_channels, RNBO::SampleValue * const output, size_t output_channels, size_t num_frames) {
+int rnbo_objectProcessInterleaved(CoreObjectRef obj, RNBO::SampleValue *input, size_t input_channels, RNBO::SampleValue * const output, size_t output_channels, size_t num_frames) {
 	RNBO::CoreObject *object = static_cast<RNBO::CoreObject *>(obj);
 	RNBO::SampleValue const *input_ptr = static_cast<RNBO::SampleValue const *>(input);
-	object->process<RNBO::SampleValue const *, RNBO::SampleValue * const>(input_ptr, input_channels, output, output_channels, num_frames);
+	try {
+		object->process<RNBO::SampleValue const *, RNBO::SampleValue * const>(input_ptr, input_channels, output, output_channels, num_frames);
+	} catch (...) {
+		return -1;
+	}
 }
 
 int rnbo_objectGetParameterIndexForId(CoreObjectRef obj, const char *id) {
