@@ -127,7 +127,7 @@ fn buildLoaderJni(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, use
         .optimize = optimize,
         .root_source_file = b.path("src/loader_jni.zig"),
         .link_libc = true,
-        .strip = true,
+        .strip = optimize == OptimizeMode.ReleaseFast,
         .imports = &.{
             .{ .name = "android", .module = android_dep.module("android") },
         },
