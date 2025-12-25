@@ -39,7 +39,7 @@ fn buildRnboLibrary(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, u
         .target = target,
         .optimize = optimize,
         .sanitize_c = false,
-        .strip = true,
+        .strip = optimize == .ReleaseFast,
     });
 
     const c_files = [_]LazyPath{

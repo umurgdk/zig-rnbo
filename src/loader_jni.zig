@@ -191,6 +191,11 @@ const RnboObject = struct {
         const library = getLibrary(env, this) catch return;
         const object = getObject(env, this) catch return;
 
+        if (@intFromPtr(library) == 0 or @intFromPtr(object) == 0) {
+            std.log.err("Object or Library is null", .{});
+            return;
+        }
+
         var input_ptr: ?[*]SampleType = null;
         var output_ptr: ?[*]SampleType = null;
 
@@ -214,7 +219,7 @@ const RnboObject = struct {
         );
 
         if (result < 0) {
-            android.exception.throw(env, "RNBO::Object.processInterleaved failed!");
+            android.exception.throw(env, "processInterleaved");
         }
     }
 
@@ -279,6 +284,7 @@ const RnboObject = struct {
 
         // TODO(umur): Release callback?!?!?!?!
         library.functions.objectSetExternalData(object, id_utf, data_ptr, @intCast(data_size), buffer_type, null);
+        std.log.debug("AudioBuffer is set on RNBO::Object", .{});
     }
 
     pub fn setExternalData(cenv: *jni.cEnv, this: jni.jobject, id: jni.jstring, data_arr: jni.jbyteArray, buffer_type_tag: jni.jint, buffer_type_channels: jni.jint, buffer_type_samplerate: jni.jlong) callconv(.c) void {
@@ -304,6 +310,7 @@ const RnboObject = struct {
 
         // TODO(umur): Release callback?!?!?!?!
         library.functions.objectSetExternalData(object, id_utf, data_ptr, data_len, buffer_type, null);
+        std.log.debug("AudioBuffer is set on RNBO::Object", .{});
     }
 
     pub fn setPreset(cenv: *jni.cEnv, this: jni.jobject, preset_object: jni.jobject) callconv(.c) void {

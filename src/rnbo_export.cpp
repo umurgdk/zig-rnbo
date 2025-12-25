@@ -76,6 +76,7 @@ int rnbo_objectProcessInterleaved(CoreObjectRef obj, RNBO::SampleValue *input, s
 	RNBO::SampleValue const *input_ptr = static_cast<RNBO::SampleValue const *>(input);
 	try {
 		object->process<RNBO::SampleValue const *, RNBO::SampleValue * const>(input_ptr, input_channels, output, output_channels, num_frames);
+		return 0;
 	} catch (...) {
 		return -1;
 	}
