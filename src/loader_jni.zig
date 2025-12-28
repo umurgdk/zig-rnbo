@@ -335,6 +335,21 @@ const RnboObject = struct {
             return;
         }
     }
+
+    pub fn sendMessageWithNumber(cenv: *jni.cEnv, this: jni.jobject, inport: jni.jstring, value: Number) callconv(.c) void {
+        const env = jni.JNIEnv.warp(cenv);
+        const library = getLibrary(env, this) catch return;
+        const object = getObject(env, this) catch return;
+
+        var inport_bytes_copied = false;
+        const inport_utf = env.getStringUTFChars(inport, &inport_bytes_copied);
+        defer env.releaseStringUTFChars(inport, inport_utf);
+
+        if (!library.functions.objectSendMessageWithNumber(object, inport_utf, value)) {
+            android.exception.throw(env, "Failed to send message");
+            return;
+        }
+    }
 };
 
 const RnboPresetList = struct {

@@ -139,6 +139,16 @@ bool rnbo_objectSendMessage(CoreObjectRef obj, const char *tag) {
 	}
 }
 
+bool rnbo_objectSendMessageWithNumber(CoreObjectRef obj, const char *tag, RNBO::number value) {
+	RNBO::CoreObject *object = static_cast<RNBO::CoreObject *>(obj);
+	try {
+		object->sendMessage(RNBO::TAG(tag), value, RNBO::TAG(""));
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 /// 
 /// RNBO::PresetList

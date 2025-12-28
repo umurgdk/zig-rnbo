@@ -31,6 +31,7 @@ pub const Functions = extern struct {
     objectSetParameterValueTime: *const fn (obj: *Object, parameter_index: ParameterIndex, value: Number, time_ms: f64) callconv(.c) void,
 
     objectSendMessage: *const fn (obj: *Object, tag: [*c]const u8) callconv(.c) bool,
+    objectSendMessageWithNumber: *const fn (obj: *Object, tag: [*c]const u8, value: Number) callconv(.c) bool,
 
     objectSetExternalData: *const fn (obj: *Object, id: [*c]const u8, data: [*c]u8, data_size: usize, buffer_type: BufferType, release_cb: ?ExternalDataReleaseCallback) callconv(.c) void,
 
