@@ -1,8 +1,56 @@
+#include <__config>
 #define VECTOR_LEN 128
 
 #include "RNBO.h"
 
 // extern "C" RNBO::PatcherFactoryFunctionPtr GetPatcherFactoryFunction(RNBO::PlatformInterface* platformInterface);
+
+extern "C" {
+typedef struct {
+	void *userinfo;
+	void (*onBangEvent)(void *userinfo, void *object, uint32_t tag);
+	void (*onNumberEvent)(void *userinfo, void *object, uint32_t tag, RNBO::number value);
+	void (*onError)(void *userinfo, void *object);
+} EventHandlerCallbacks;
+}
+
+class PassthroughEventHandler : RNBO::EventHandler {
+public:
+	PassthroughEventHandler(EventHandlerCallbacks callbacks, RNBO::CoreObject *object) : m_callbacks(callbacks), m_object(object) {
+		m_event_interface = object->createParameterInterface(
+			RNBO::ParameterEventInterface::Type::MultiProducer,
+			this
+		);
+	}
+
+	EventHandlerCallbacks m_callbacks;
+
+private:
+	RNBO::CoreObject      *m_object;
+	RNBO::ParameterEventInterfaceUniquePtr m_event_interface;
+
+	void eventsAvailable() override {
+		drainEvents();
+	}
+
+	void handleMessageEvent(const RNBO::MessageEvent &event) override {
+		try {
+			switch (event.getType()) {
+				case RNBO::MessageEvent::Type::Number:
+					m_callbacks.onNumberEvent(m_callbacks.userinfo, m_object, event.getTag(), event.getNumValue());
+					break;
+
+				case RNBO::MessageEvent::Type::Bang:
+					m_callbacks.onBangEvent(m_callbacks.userinfo, m_object, event.getTag());
+					break;
+				default:
+				break;
+			}
+		} catch (...) {
+			m_callbacks.onError(m_callbacks.userinfo, m_object);
+		}
+	}
+};
 
 extern "C" {
 
@@ -31,6 +79,7 @@ typedef struct {
 typedef void * CoreObjectRef;
 typedef void * PresetListRef;
 typedef void * PresetRef;
+typedef void * EventHandlerRef;
 
 CoreObjectRef _Nullable rnbo_objectNew() {
 	// auto patcher_interface = GetPatcherFactoryFunction(RNBO::Platform::get())();
@@ -146,6 +195,13 @@ bool rnbo_objectSendMessageWithNumber(CoreObjectRef obj, const char *tag, RNBO::
 		return true;
 	} catch (...) {
 		return false;
+
+const char *rnbo_objectResolveTag(CoreObjectRef obj, uint32_t tag) {
+	RNBO::CoreObject *object = static_cast<RNBO::CoreObject *>(obj);
+	try {
+		return object->resolveTag(tag);
+	} catch (...) {
+		return nullptr;
 	}
 }
 
@@ -175,4 +231,26 @@ PresetRef rnbo_presetListPresetWithName(PresetListRef preset_list, const char *n
 	auto preset = p->presetWithName(name);
 	return preset.release();
 }
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+/// 
+/// EventHandler
+///
+
+EventHandlerRef rnbo_newEventHandler(CoreObjectRef obj, EventHandlerCallbacks callbacks) {
+	RNBO::CoreObject *object = static_cast<RNBO::CoreObject *>(obj);
+	PassthroughEventHandler *event_handler = new PassthroughEventHandler(callbacks, object);
+	return event_handler;
+}
+
+void rnbo_destroyEventHandler(EventHandlerRef event_handler_ptr) {
+	PassthroughEventHandler *event_handler = static_cast<PassthroughEventHandler *>(event_handler_ptr);
+	delete event_handler;
+}
+
+EventHandlerCallbacks rnbo_eventHandlerGetCallbacks(EventHandlerRef event_handler_ptr) {
+	PassthroughEventHandler *event_handler = static_cast<PassthroughEventHandler *>(event_handler_ptr);
+	return event_handler->m_callbacks;
+}
+
 }

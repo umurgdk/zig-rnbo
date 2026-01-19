@@ -34,11 +34,16 @@ pub const Functions = extern struct {
     objectSendMessageWithNumber: *const fn (obj: *Object, tag: [*c]const u8, value: Number) callconv(.c) bool,
 
     objectSetExternalData: *const fn (obj: *Object, id: [*c]const u8, data: [*c]u8, data_size: usize, buffer_type: BufferType, release_cb: ?ExternalDataReleaseCallback) callconv(.c) void,
+    objectResolveTag: *const fn (obj: *Object, tag: u32) callconv(.c) [*c]const u8,
 
     presetListFromMemory: *const fn (data: [*c]const u8) callconv(.c) *PresetList,
     presetListDestroy: *const fn (self: *PresetList) callconv(.c) void,
     presetListPresetAtIndex: *const fn (self: *PresetList, index: usize) callconv(.c) *Preset,
     presetListPresetWithName: *const fn (self: *PresetList, name: [*c]const u8) callconv(.c) *Preset,
+
+    newEventHandler: *const fn (obj: *Object, callbacks: EventHandlerCallbacks) callconv(.c) ?*EventHandler,
+    destroyEventHandler: *const fn (event_handler: *EventHandler) callconv(.c) void,
+    eventHandlerGetCallbacks: *const fn (event_handler: *EventHandler) callconv(.c) EventHandlerCallbacks,
 };
 
 pub fn loadLibrary(path: [:0]const u8) !Library {
@@ -63,3 +68,11 @@ pub fn loadLibrary(path: [:0]const u8) !Library {
 pub const Object = opaque {};
 pub const Preset = opaque {};
 pub const PresetList = opaque {};
+pub const EventHandler = opaque {};
+
+pub const EventHandlerCallbacks = extern struct {
+    userinfo: *anyopaque,
+    onBangEvent: *const fn (userinfo: *anyopaque, object: *Object, tag: u32) callconv(.c) void,
+    onNumberEvent: *const fn (userinfo: *anyopaque, object: *Object, tag: u32, value: Number) callconv(.c) void,
+    onError: *const fn (userinfo: *anyopaque, object: *Object) callconv(.c) void,
+};

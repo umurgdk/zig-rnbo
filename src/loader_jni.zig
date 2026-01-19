@@ -25,6 +25,7 @@ comptime {
     jni.exportJNI(options.java_package ++ ".RnboLibrary", RnboLibrary);
     jni.exportJNI(options.java_package ++ ".RnboObject", RnboObject);
     jni.exportJNI(options.java_package ++ ".RnboPresetList", RnboPresetList);
+    jni.exportJNI(options.java_package ++ ".RnboEventHandler", RnboEventHandler);
 }
 
 const allocator = std.heap.smp_allocator;
@@ -105,6 +106,7 @@ const RnboLibrary = struct {
 };
 
 const RnboObject = struct {
+    pub const Instance = jni.jobject;
     pub const Class = android.defineClass(PACKAGE_NAME ++ ".RnboObject");
 
     const library_prop = android.defineInstanceProperty(Class, "library", RnboLibrary.Class);
@@ -435,5 +437,167 @@ const RnboPreset = struct {
         const preset_handle: jni.jlong = @bitCast(preset_address);
         const object = env.newObject(class, constructor, &jni.toJValues(.{preset_handle}));
         return object;
+    }
+};
+
+const RnboEventHandler = struct {
+    const Instance = jni.jobject;
+    const Class = android.defineClass(PACKAGE_NAME ++ ".RnboEventHandler");
+
+    const CallbackData = struct {
+        jvm: jni.JavaVM,
+        this: jni.jobject,
+        tag_cache: std.StringArrayHashMapUnmanaged(jni.jstring),
+    };
+
+    const handle_prop = android.defineInstanceProperty(Class, "handle", jni.jlong);
+    const rnbo_object_prop = android.defineInstanceProperty(Class, "rnboObject", RnboObject.Class);
+
+    const on_bang_event = android.defineMethod(Class, "onBangEvent", void, .{android.types.string});
+    const on_number_event = android.defineMethod(Class, "onNumberEvent", void, .{ android.types.string, Number });
+    const on_error = android.defineMethod(Class, "onError", void, .{});
+
+    pub fn getEventHandler(env: jni.JNIEnv, this: jni.jobject) !*loader.EventHandler {
+        const handle = try handle_prop.get(env, this);
+        const event_handler_address: usize = @bitCast(handle);
+        const event_handler: *loader.EventHandler = @ptrFromInt(event_handler_address);
+        return event_handler;
+    }
+
+    pub fn initialize(cenv: *jni.cEnv, this: jni.jobject) callconv(.c) void {
+        const env = jni.JNIEnv.warp(cenv);
+        const obj_instance = rnbo_object_prop.get(env, this) catch return;
+        const rnbo_obj = RnboObject.getObject(env, obj_instance) catch return;
+        const library = RnboObject.getLibrary(env, obj_instance) catch return;
+
+        const callback_data = allocator.create(CallbackData) catch |err| {
+            android.exception.throwZig(env, err, @errorReturnTrace(), "Failed to allocate RnboEventHandler callback data", .{});
+            return;
+        };
+
+        callback_data.this = env.newGlobalRef(this);
+        callback_data.tag_cache = .{};
+        env.getJavaVM(&callback_data.jvm) catch |err| {
+            return android.exception.throwZig(env, err, @errorReturnTrace(), "Failed to obtain jvm pointer", .{});
+        };
+
+        const event_handler = library.functions.newEventHandler(rnbo_obj, .{
+            .userinfo = callback_data,
+            .onBangEvent = onBangEvent,
+            .onNumberEvent = onNumberEvent,
+            .onError = onError,
+        }) orelse {
+            return android.exception.throw(env, "Failed to create RnboEventHandler");
+        };
+
+        handle_prop.set(env, this, @bitCast(@intFromPtr(event_handler))) catch return;
+    }
+
+    pub fn destroy(cenv: *jni.cEnv, this: jni.jobject) callconv(.c) void {
+        const env = jni.JNIEnv.warp(cenv);
+        const object_instance = rnbo_object_prop.get(env, this) catch return;
+        const library = RnboObject.getLibrary(env, object_instance) catch return;
+        const event_handler = getEventHandler(env, this) catch return;
+
+        const callbacks = library.functions.eventHandlerGetCallbacks(event_handler);
+        library.functions.destroyEventHandler(event_handler);
+
+        const callback_data: *CallbackData = @ptrCast(@alignCast(callbacks.userinfo));
+        allocator.destroy(callback_data);
+
+        handle_prop.set(env, this, 0) catch return;
+    }
+
+    fn onBangEvent(userinfo: *anyopaque, object: *loader.Object, tag: u32) callconv(.c) void {
+        const cb_data: *CallbackData = @ptrCast(@alignCast(userinfo));
+
+        var cenv: ?*jni.cEnv = undefined;
+        cb_data.jvm.attachCurrentThread(&cenv, null) catch @panic("failed to attach audio thread to jvm");
+
+        const env = jni.JNIEnv.warp(cenv.?);
+        const this = cb_data.this;
+
+        const object_instance = rnbo_object_prop.get(env, this) catch return;
+        const library = RnboObject.getLibrary(env, object_instance) catch return;
+
+        const tag_cstr = library.functions.objectResolveTag(object, tag) orelse return;
+        const tag_slice = std.mem.span(tag_cstr);
+        if (cb_data.tag_cache.get(tag_slice)) |tag_jstr| {
+            on_bang_event.call(env, cb_data.this, .{tag_jstr}) catch |err| {
+                std.log.err("Failed to call instance method onBangEvent: {}", .{err});
+                return;
+            };
+        } else {
+            const tag_jstr = env.newStringUTF(tag_slice);
+            const tag_jstr_global = env.newGlobalRef(tag_jstr);
+            cb_data.tag_cache.put(allocator, tag_slice, tag_jstr_global) catch |err| {
+                std.log.err("Failed to put tag string into cache: {}", .{err});
+            };
+
+            on_bang_event.call(env, cb_data.this, .{tag_jstr_global}) catch |err| {
+                std.log.err("Failed to call instance method onBangEvent: {}", .{err});
+                return;
+            };
+        }
+
+        if (env.exceptionCheck()) {
+            std.log.err("JVM EventHandler onBangEvent throw exception", .{});
+            env.exceptionDescribe();
+        }
+    }
+
+    fn onNumberEvent(userinfo: *anyopaque, object: *loader.Object, tag: u32, value: Number) callconv(.c) void {
+        const cb_data: *CallbackData = @ptrCast(@alignCast(userinfo));
+
+        var cenv: ?*jni.cEnv = undefined;
+        cb_data.jvm.attachCurrentThread(&cenv, null) catch @panic("failed to attach audio thread to jvm");
+
+        const env = jni.JNIEnv.warp(cenv.?);
+        const this = cb_data.this;
+
+        const object_instance = rnbo_object_prop.get(env, this) catch return;
+        const library = RnboObject.getLibrary(env, object_instance) catch return;
+
+        const tag_cstr = library.functions.objectResolveTag(object, tag) orelse return;
+        const tag_slice = std.mem.span(tag_cstr);
+
+        const tag_jstr = cb_data.tag_cache.get(tag_slice) orelse brk: {
+            const tag_jstr = env.newStringUTF(tag_slice);
+            const tag_jstr_global = env.newGlobalRef(tag_jstr);
+            cb_data.tag_cache.put(allocator, tag_slice, tag_jstr_global) catch |err| {
+                std.log.err("Failed to put tag string into cache: {}", .{err});
+            };
+
+            break :brk tag_jstr_global;
+        };
+
+        on_number_event.call(env, cb_data.this, .{ tag_jstr, value }) catch |err| {
+            std.log.err("Failed to call instance method onNumberEvent: {}", .{err});
+            return;
+        };
+
+        if (env.exceptionCheck()) {
+            std.log.err("JVM EventHandler onBangEvent throw exception", .{});
+            env.exceptionDescribe();
+        }
+    }
+
+    fn onError(userinfo: *anyopaque, object: *loader.Object) callconv(.c) void {
+        _ = object;
+        const cb_data: *CallbackData = @ptrCast(@alignCast(userinfo));
+
+        var cenv: ?*jni.cEnv = undefined;
+        cb_data.jvm.attachCurrentThread(&cenv, null) catch @panic("failed to attach audio thread to jvm");
+
+        const env = jni.JNIEnv.warp(cenv.?);
+        on_error.call(env, cb_data.this, .{}) catch |err| {
+            std.log.err("Failed to call instance method onError: {}", .{err});
+            return;
+        };
+
+        if (env.exceptionCheck()) {
+            std.log.err("JVM EventHandler onBangEvent throw exception", .{});
+            env.exceptionDescribe();
+        }
     }
 };
