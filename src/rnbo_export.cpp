@@ -195,6 +195,8 @@ bool rnbo_objectSendMessageWithNumber(CoreObjectRef obj, const char *tag, RNBO::
 		return true;
 	} catch (...) {
 		return false;
+	}
+}
 
 const char *rnbo_objectResolveTag(CoreObjectRef obj, uint32_t tag) {
 	RNBO::CoreObject *object = static_cast<RNBO::CoreObject *>(obj);
