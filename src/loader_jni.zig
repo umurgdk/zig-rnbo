@@ -87,7 +87,7 @@ const RnboLibrary = struct {
         const library = getLibrary(env, this) catch return null;
 
         const object = library.functions.objectNew();
-        const object_instance = RnboObject.construct(env, this, object) catch return null;
+        const object_instance = RnboObject.construct(env, this, object, library) catch return null;
 
         return object_instance;
     }
@@ -105,12 +105,20 @@ const RnboLibrary = struct {
     }
 };
 
+const ReleaseCallbackContext = struct {
+    jvm: jni.JavaVM,
+    this: jni.jobject,
+};
+
 const RnboObject = struct {
     pub const Instance = jni.jobject;
     pub const Class = android.defineClass(PACKAGE_NAME ++ ".RnboObject");
 
     const library_prop = android.defineInstanceProperty(Class, "library", RnboLibrary.Class);
     const handle_prop = android.defineInstanceProperty(Class, "handle", jni.jlong);
+    const release_ctx_prop = android.defineInstanceProperty(Class, "releaseCallbackHandle", jni.jlong);
+
+    const on_buffer_released = android.defineMethod(Class, "onBufferReleased", void, .{jni.jlong});
 
     const constructor_method = android.defineMethod(Class, "<init>", void, .{ RnboLibrary.Class, jni.jlong });
 
@@ -126,27 +134,69 @@ const RnboObject = struct {
         return object;
     }
 
-    pub fn construct(env: jni.JNIEnv, library_object: jni.jobject, rnbo_object: *loader.Object) !jni.jobject {
+    pub fn construct(env: jni.JNIEnv, library_object: jni.jobject, rnbo_object: *loader.Object, library: *loader.Library) !jni.jobject {
         const class = try Class.get(env);
         const constructor = try constructor_method.getMethodId(env);
 
         const object_handle: jni.jlong = @bitCast(@intFromPtr(rnbo_object));
         const object = env.newObject(class, constructor, &jni.toJValues(.{ library_object, object_handle }));
+
+        library.functions.objectInitialize(rnbo_object);
+
+        const ctx = try allocator.create(ReleaseCallbackContext);
+        ctx.this = env.newGlobalRef(object);
+        env.getJavaVM(&ctx.jvm) catch {
+            allocator.destroy(ctx);
+            return object;
+        };
+        release_ctx_prop.set(env, object, @bitCast(@intFromPtr(ctx))) catch {
+            env.deleteGlobalRef(ctx.this);
+            allocator.destroy(ctx);
+        };
+
         return object;
     }
 
-    pub fn initialize(cenv: *jni.cEnv, this: jni.jobject) callconv(.c) void {
-        const env = jni.JNIEnv.warp(cenv);
-        const library = getLibrary(env, this) catch return;
-        const object = getObject(env, this) catch return;
-        library.functions.objectInitialize(object);
+    fn externalDataReleaseCallback(_: [*c]const u8, address: [*c]u8, userdata: ?*anyopaque) callconv(.c) void {
+        const ctx: *ReleaseCallbackContext = @ptrCast(@alignCast(userdata orelse {
+            std.log.err("release callback: userdata is null", .{});
+            return;
+        }));
+
+        var cenv: ?*jni.cEnv = undefined;
+        ctx.jvm.attachCurrentThread(&cenv, null) catch |err| {
+            std.log.err("release callback: attachCurrentThread failed: {}", .{err});
+            return;
+        };
+
+        const env = jni.JNIEnv.warp(cenv.?);
+        const addr: jni.jlong = @bitCast(@as(usize, @intFromPtr(address)));
+        on_buffer_released.call(env, ctx.this, .{addr}) catch |err| {
+            std.log.err("release callback: onBufferReleased call failed: {}", .{err});
+        };
+
+        if (env.exceptionCheck()) {
+            std.log.err("release callback: JNI exception in onBufferReleased", .{});
+            env.exceptionDescribe();
+            env.exceptionClear();
+        }
     }
 
     pub fn destroy(cenv: *jni.cEnv, this: jni.jobject) callconv(.c) void {
         const env = jni.JNIEnv.warp(cenv);
+
         const library = getLibrary(env, this) catch return;
         const object = getObject(env, this) catch return;
         library.functions.objectDestroy(object);
+
+        // Free release callback context AFTER objectDestroy, since RNBO's
+        // destructor fires release callbacks for all external data refs.
+        const ctx_handle = release_ctx_prop.get(env, this) catch 0;
+        if (ctx_handle != 0) {
+            const ctx: *ReleaseCallbackContext = @ptrFromInt(@as(usize, @bitCast(ctx_handle)));
+            env.deleteGlobalRef(ctx.this);
+            allocator.destroy(ctx);
+        }
     }
 
     pub fn prepareToProcess(cenv: *jni.cEnv, this: jni.jobject, sample_rate: jni.jlong, buffer_frames: jni.jlong) callconv(.c) void {
@@ -284,9 +334,15 @@ const RnboObject = struct {
             .samplerate = @floatFromInt(buffer_type_samplerate),
         };
 
-        // TODO(umur): Release callback?!?!?!?!
-        library.functions.objectSetExternalData(object, id_utf, data_ptr, @intCast(data_size), buffer_type, null);
-        std.log.debug("AudioBuffer is set on RNBO::Object", .{});
+        const ctx_handle = release_ctx_prop.get(env, this) catch 0;
+        const ctx_ptr: ?*anyopaque = if (ctx_handle != 0)
+            @ptrFromInt(@as(usize, @bitCast(ctx_handle)))
+        else
+            null;
+
+
+        library.functions.objectSetExternalData(object, id_utf, data_ptr, @intCast(data_size), buffer_type, externalDataReleaseCallback, ctx_ptr);
+        std.log.warn("setExternalData: done", .{});
     }
 
     pub fn setExternalData(cenv: *jni.cEnv, this: jni.jobject, id: jni.jstring, data_arr: jni.jbyteArray, buffer_type_tag: jni.jint, buffer_type_channels: jni.jint, buffer_type_samplerate: jni.jlong) callconv(.c) void {
@@ -310,8 +366,9 @@ const RnboObject = struct {
             .samplerate = @floatFromInt(buffer_type_samplerate),
         };
 
-        // TODO(umur): Release callback?!?!?!?!
-        library.functions.objectSetExternalData(object, id_utf, data_ptr, data_len, buffer_type, null);
+        // Cannot use release callback here: JNI array elements are released by
+        // defer above before RNBO's audio thread would call the callback.
+        library.functions.objectSetExternalData(object, id_utf, data_ptr, data_len, buffer_type, null, null);
         std.log.debug("AudioBuffer is set on RNBO::Object", .{});
     }
 

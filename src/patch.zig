@@ -118,8 +118,8 @@ pub const Patch = struct {
         patch.object.setParameterValue(param_index, @floatCast(param_value));
     }
 
-    pub fn setExternalData(patch: *Patch, id: [:0]const u8, data: []u8, buffer_type: BufferType, release_cb: ?ExternalDataReleaseCallback) void {
-        rnbo_objectSetExternalData(patch.object, id.ptr, data.ptr, data.len, buffer_type, release_cb);
+    pub fn setExternalData(patch: *Patch, id: [:0]const u8, data: []u8, buffer_type: BufferType, release_cb: ?ExternalDataReleaseCallback, userdata: ?*anyopaque) void {
+        rnbo_objectSetExternalData(patch.object, id.ptr, data.ptr, data.len, buffer_type, release_cb, userdata);
     }
 };
 

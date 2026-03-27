@@ -157,23 +157,32 @@ void rnbo_objectSetParameterValueTime(CoreObjectRef obj, int parameter_index, RN
 	object->setParameterValue(parameter_index, value, time);
 }
 
-void rnbo_objectSetExternalData(CoreObjectRef obj, const char *id, char *data, size_t data_size, rnbo_BufferType type, void (*release_cb)(const char *id, char *address)) {
+typedef void (*ExternalDataReleaseFn)(const char *id, char *address, void *userdata);
+
+void rnbo_objectSetExternalData(CoreObjectRef obj, const char *id, char *data, size_t data_size, rnbo_BufferType type, ExternalDataReleaseFn release_cb, void *userdata) {
 	RNBO::CoreObject *object = static_cast<RNBO::CoreObject *>(obj);
+
+	RNBO::ReleaseCallback wrapped_cb = nullptr;
+	if (release_cb) {
+		wrapped_cb = [release_cb, userdata](RNBO::ExternalDataId memId, char *addr) {
+			release_cb(memId, addr, userdata);
+		};
+	}
 
 	switch (type.tag) {
 		case RNBO_BUFFER_TYPE_FLOAT32: {
 			RNBO::Float32AudioBuffer buffer_type(type.channels, type.samplerate);
-			object->setExternalData(id, data, data_size, buffer_type, release_cb);
+			object->setExternalData(id, data, data_size, buffer_type, wrapped_cb);
 		} break;
 
 		case RNBO_BUFFER_TYPE_FLOAT64: {
 			RNBO::Float64AudioBuffer buffer_type(type.channels, type.samplerate);
-			object->setExternalData(id, data, data_size, buffer_type, release_cb);
+			object->setExternalData(id, data, data_size, buffer_type, wrapped_cb);
 		} break;
 
 		case RNBO_BUFFER_TYPE_UNTYPED: {
 			RNBO::UntypedDataBuffer untyped;
-			object->setExternalData(id, data, data_size, untyped, release_cb);
+			object->setExternalData(id, data, data_size, untyped, wrapped_cb);
 		} break;
 	}
 }

@@ -27,7 +27,7 @@ extern fn rnbo_objectGetParameterValue(obj: *Object, parameter_index: ParameterI
 extern fn rnbo_objectSetParameterValue(obj: *Object, parameter_index: ParameterIndex, value: Number) callconv(.c) void;
 extern fn rnbo_objectSetParameterValueTime(obj: *Object, parameter_index: ParameterIndex, value: Number, time_ms: f64) callconv(.c) void;
 
-extern fn rnbo_objectSetExternalData(obj: *Object, id: [*c]const u8, data: [*c]u8, data_size: usize, buffer_type: BufferType, release_cb: ?ExternalDataReleaseCallback) callconv(.c) void;
+extern fn rnbo_objectSetExternalData(obj: *Object, id: [*c]const u8, data: [*c]u8, data_size: usize, buffer_type: BufferType, release_cb: ?ExternalDataReleaseCallback, userdata: ?*anyopaque) callconv(.c) void;
 
 pub const Object = opaque {
     pub const initialize = rnbo_objectInitialize;
@@ -71,8 +71,8 @@ pub const Object = opaque {
         rnbo_objectProcessInterleaved(obj, input_ptr, output_ptr, num_frames);
     }
 
-    pub fn setExternalData(obj: *Object, id: [:0]const u8, data: []u8, buffer_type: BufferType, release_cb: ?ExternalDataReleaseCallback) void {
-        rnbo_objectSetExternalData(obj, id.ptr, data.ptr, data.len, buffer_type, release_cb);
+    pub fn setExternalData(obj: *Object, id: [:0]const u8, data: []u8, buffer_type: BufferType, release_cb: ?ExternalDataReleaseCallback, userdata: ?*anyopaque) void {
+        rnbo_objectSetExternalData(obj, id.ptr, data.ptr, data.len, buffer_type, release_cb, userdata);
     }
 };
 

@@ -11,4 +11,4 @@ pub const BufferType = extern struct {
     };
 };
 
-pub const ExternalDataReleaseCallback = *const fn (id: [*c]const u8, address: [*c]u8) callconv(.c) void;
+pub const ExternalDataReleaseCallback = *const fn (id: [*c]const u8, address: [*c]u8, userdata: ?*anyopaque) callconv(.c) void;
