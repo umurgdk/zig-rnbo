@@ -51,7 +51,16 @@ fn buildRnboLibrary(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, u
     for (&c_files) |path| {
         rnbo_module.addCSourceFile(.{
             .file = path,
-            .flags = &.{ "-std=c++11", "-DANDROID", if (use_f32) USE_FLOAT32_FLAG else "" },
+            .flags = &.{
+                "-std=c++11",
+                "-DANDROID",
+                "-DNDEBUG",
+                "-O3",
+                "-fno-math-errno",
+                "-fno-trapping-math",
+                "-fno-signed-zeros",
+                if (use_f32) USE_FLOAT32_FLAG else "",
+            },
             .language = .cpp,
         });
     }
@@ -186,7 +195,15 @@ fn buildZigLibrary(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, us
     for (&c_files) |path| {
         rnbo_mod.addCSourceFile(.{
             .file = path,
-            .flags = &.{ "-std=c++11", if (use_f32) USE_FLOAT32_FLAG else "" },
+            .flags = &.{
+                "-std=c++11",
+                "-DNDEBUG",
+                "-O3",
+                "-fno-math-errno",
+                "-fno-trapping-math",
+                "-fno-signed-zeros",
+                if (use_f32) USE_FLOAT32_FLAG else "",
+            },
             .language = .cpp,
         });
     }
