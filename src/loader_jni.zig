@@ -658,3 +658,24 @@ const RnboEventHandler = struct {
         }
     }
 };
+
+/// Exported C function for direct audio processing from Oboe C++ callback.
+/// Called from libnvaudio_oboe.so via dlsym — no JNI involved.
+export fn rnbo_loader_process_interleaved(
+    library_ptr: usize,
+    object_ptr: usize,
+    output: [*]SampleType,
+    output_channels: usize,
+    num_frames: usize,
+) callconv(.c) c_int {
+    const library: *loader.Library = @ptrFromInt(library_ptr);
+    const object: *loader.Object = @ptrFromInt(object_ptr);
+    return library.functions.objectProcessInterleaved(
+        object,
+        null,
+        0,
+        output,
+        output_channels,
+        num_frames,
+    );
+}
