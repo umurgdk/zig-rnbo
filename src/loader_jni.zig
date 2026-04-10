@@ -409,6 +409,14 @@ const RnboObject = struct {
             return;
         }
     }
+
+    pub fn createAudioRenderer(cenv: *jni.cEnv, this: jni.jobject) callconv(.c) jni.jlong {
+        const env = jni.JNIEnv.warp(cenv);
+        const library = getLibrary(env, this) catch return 0;
+        const object = getObject(env, this) catch return 0;
+        const renderer = rnbo_create_audio_renderer(@intFromPtr(library), @intFromPtr(object));
+        return if (renderer) |r| @bitCast(@intFromPtr(r)) else 0;
+    }
 };
 
 const RnboPresetList = struct {
@@ -658,6 +666,77 @@ const RnboEventHandler = struct {
         }
     }
 };
+
+// ---------------------------------------------------------------------------
+// AudioRenderer — generic native audio renderer for zero-JNI audio callbacks.
+// DSP libraries create AudioRenderer instances; audio backends (Oboe, etc.)
+// call the process function pointer directly on the audio thread.
+// ---------------------------------------------------------------------------
+
+const AudioRenderer = extern struct {
+    context: ?*anyopaque,
+    process: ?*const fn (context: ?*anyopaque, output: [*]SampleType, output_channels: usize, num_frames: usize) callconv(.c) c_int,
+    destroy: ?*const fn (renderer: *AudioRenderer) callconv(.c) void,
+};
+
+const RnboRendererContext = struct {
+    library: *loader.Library,
+    object: *loader.Object,
+};
+
+fn rnboRendererProcess(
+    context: ?*anyopaque,
+    output: [*]SampleType,
+    output_channels: usize,
+    num_frames: usize,
+) callconv(.c) c_int {
+    const ctx: *RnboRendererContext = @ptrCast(@alignCast(context orelse return -1));
+    return ctx.library.functions.objectProcessInterleaved(
+        ctx.object,
+        null,
+        0,
+        output,
+        output_channels,
+        num_frames,
+    );
+}
+
+fn rnboRendererDestroy(renderer: *AudioRenderer) callconv(.c) void {
+    if (renderer.context) |ctx| {
+        const typed: *RnboRendererContext = @ptrCast(@alignCast(ctx));
+        allocator.destroy(typed);
+    }
+    allocator.destroy(renderer);
+}
+
+export fn rnbo_create_audio_renderer(
+    library_ptr: usize,
+    object_ptr: usize,
+) callconv(.c) ?*AudioRenderer {
+    const ctx = allocator.create(RnboRendererContext) catch return null;
+    ctx.* = .{
+        .library = @ptrFromInt(library_ptr),
+        .object = @ptrFromInt(object_ptr),
+    };
+
+    const renderer = allocator.create(AudioRenderer) catch {
+        allocator.destroy(ctx);
+        return null;
+    };
+    renderer.* = .{
+        .context = ctx,
+        .process = &rnboRendererProcess,
+        .destroy = &rnboRendererDestroy,
+    };
+    return renderer;
+}
+
+export fn rnbo_destroy_audio_renderer(renderer: ?*AudioRenderer) callconv(.c) void {
+    const r = renderer orelse return;
+    if (r.destroy) |destroy_fn| {
+        destroy_fn(r);
+    }
+}
 
 /// Exported C function for direct audio processing from Oboe C++ callback.
 /// Called from libnvaudio_oboe.so via dlsym — no JNI involved.
