@@ -12,7 +12,7 @@ const PACKAGE_NAME = options.java_package;
 const LibraryHandle = jni.jlong;
 
 const Number = if (options.use_f32) jni.jfloat else jni.jdouble;
-const NumberArray = if (options.use_f32) jni.floatArray else jni.jdoubleArray;
+const NumberArray = if (options.use_f32) jni.jfloatArray else jni.jdoubleArray;
 const SampleType = if (options.use_f32) jni.jfloat else jni.jdouble;
 const SampleArray = if (options.use_f32) jni.jfloatArray else jni.jdoubleArray;
 
