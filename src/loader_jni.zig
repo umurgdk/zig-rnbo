@@ -12,6 +12,7 @@ const PACKAGE_NAME = options.java_package;
 const LibraryHandle = jni.jlong;
 
 const Number = if (options.use_f32) jni.jfloat else jni.jdouble;
+const NumberArray = if (options.use_f32) jni.floatArray else jni.jdoubleArray;
 const SampleType = if (options.use_f32) jni.jfloat else jni.jdouble;
 const SampleArray = if (options.use_f32) jni.jfloatArray else jni.jdoubleArray;
 
@@ -340,7 +341,6 @@ const RnboObject = struct {
         else
             null;
 
-
         library.functions.objectSetExternalData(object, id_utf, data_ptr, @intCast(data_size), buffer_type, externalDataReleaseCallback, ctx_ptr);
         std.log.warn("setExternalData: done", .{});
     }
@@ -405,6 +405,26 @@ const RnboObject = struct {
         defer env.releaseStringUTFChars(inport, inport_utf);
 
         if (!library.functions.objectSendMessageWithNumber(object, inport_utf, value)) {
+            android.exception.throw(env, "Failed to send message");
+            return;
+        }
+    }
+
+    pub fn sendMessageWithList(cenv: *jni.cEnv, this: jni.jobject, inport: jni.jstring, values_arr: NumberArray) callconv(.c) void {
+        const env = jni.JNIEnv.warp(cenv);
+        const library = getLibrary(env, this) catch return;
+        const object = getObject(env, this) catch return;
+
+        var inport_bytes_copied = false;
+        const inport_utf = env.getStringUTFChars(inport, &inport_bytes_copied);
+        defer env.releaseStringUTFChars(inport, inport_utf);
+
+        var values_copied = false;
+        const values_ptr = env.getPrimitiveArrayElements(Number, values_arr, &values_copied);
+        defer env.releasePrimitiveArrayElements(Number, values_arr, values_ptr, .JNIAbort);
+        const values_len: usize = @intCast(env.getArrayLength(values_arr));
+
+        if (!library.functions.objectSendMessageWithList(object, inport_utf, values_ptr, values_len)) {
             android.exception.throw(env, "Failed to send message");
             return;
         }

@@ -207,6 +207,20 @@ bool rnbo_objectSendMessageWithNumber(CoreObjectRef obj, const char *tag, RNBO::
 	}
 }
 
+bool rnbo_objectSendMessageWithList(CoreObjectRef obj, const char *tag, const RNBO::number *values, size_t values_len) {
+	RNBO::CoreObject *object = static_cast<RNBO::CoreObject *>(obj);
+	try {
+		auto payload = RNBO::make_unique<RNBO::list>();
+		for (size_t i = 0; i < values_len; i++) {
+			payload->push(values[i]);
+		}
+		object->sendMessage(RNBO::TAG(tag), std::move(payload), RNBO::TAG(""));
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
 const char *rnbo_objectResolveTag(CoreObjectRef obj, uint32_t tag) {
 	RNBO::CoreObject *object = static_cast<RNBO::CoreObject *>(obj);
 	try {

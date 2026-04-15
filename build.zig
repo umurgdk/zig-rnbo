@@ -10,26 +10,28 @@ const USE_FLOAT32_FLAG = "-DRNBO_USE_FLOAT32";
 pub const Artifact = enum {
     rnbo_lib,
     loader_jni,
-    loader,
-    zig_module,
 };
 
 pub fn build(b: *Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const artifact = b.option(Artifact, "artifact", "Build dynamic library loader") orelse .zig_module;
+    const artifact = b.option(Artifact, "artifact", "Build dynamic library loader") orelse .loader_jni;
     const use_f32 = b.option(bool, "use_float32", "Use 32bit floating numbers instead of 64bit (default: true)") orelse true;
 
     switch (artifact) {
         .loader_jni => buildLoaderJni(b, target, optimize, use_f32),
-        .zig_module => buildZigLibrary(b, target, optimize, use_f32),
         .rnbo_lib => buildRnboLibrary(b, target, optimize, use_f32),
-        .loader => buildLoader(b, target, optimize, use_f32),
     }
 }
 
 fn buildRnboLibrary(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, use_f32: bool) void {
-    const ndk_sysroot_option = b.option([]const u8, "ndk_sysroot", "Android NDK sysroot");
+    const ndk_sysroot = b.option([]const u8, "ndk_sysroot", "Android NDK sysroot") orelse brk: {
+        const env = std.process.getEnvVarOwned(b.allocator, "ANDROID_NDK_SYSROOT") catch {
+            return b.default_step.dependOn(&b.addFail("-Dndk_sysroot parameter missing").step);
+        };
+
+        break :brk env;
+    };
     const rnbo_export = b.option(LazyPath, "rnbo_export", "RNBO export path (default: export)") orelse b.path("export");
 
     const rnbo_class_name = b.option([]const u8, "rnbo_class_name", "RNBO export class name (default: rnbo_source.cpp)") orelse "rnbo_source.cpp";
@@ -70,9 +72,6 @@ fn buildRnboLibrary(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, u
 
     if (target.result.abi.isAndroid()) {
         const android = @import("android");
-        const ndk_sysroot = ndk_sysroot_option orelse {
-            return b.default_step.dependOn(&b.addFail("-Dndk_sysroot parameter missing").step);
-        };
 
         const libc_conf = android.createLibCConf(b, target, ndk_sysroot) catch {
             b.default_step.dependOn(&b.addFail("failed to create libc.conf file").step);
@@ -88,6 +87,7 @@ fn buildRnboLibrary(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, u
             .name = b.fmt("{s}.{s}", .{ rnbo_library_name, arch_name }),
             .linkage = .dynamic,
             .root_module = rnbo_module,
+            .use_llvm = true,
         });
 
         rnbo_module.link_libc = true;
@@ -169,57 +169,4 @@ fn buildLoaderJni(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, use
     });
 
     b.getInstallStep().dependOn(&install_lib.step);
-}
-
-fn buildZigLibrary(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, use_f32: bool) void {
-    const source_dir = b.option(LazyPath, "source_dir", "Path to RNBO C++ exported directory") orelse @panic("-Dsource_dir to RNBO C++ export directory is missing");
-    const export_class_name = b.option([]const u8, "export_class_name", "Exported C++ class name, default: rnbo_source.cpp") orelse "rnbo_source.cpp";
-
-    const rnbo_mod = b.addModule("rnbo", .{
-        .target = target,
-        .optimize = optimize,
-        .root_source_file = b.path("src/rnbo.zig"),
-        .sanitize_c = false,
-    });
-
-    const options = b.addOptions();
-    options.addOption(bool, "use_f32", use_f32);
-    rnbo_mod.addOptions("options", options);
-
-    const c_files = [_]LazyPath{
-        b.path("src/rnbo_export.cpp"),
-        source_dir.path(b, export_class_name),
-        source_dir.path(b, "rnbo/RNBO.cpp"),
-    };
-
-    for (&c_files) |path| {
-        rnbo_mod.addCSourceFile(.{
-            .file = path,
-            .flags = &.{
-                "-std=c++11",
-                "-DNDEBUG",
-                "-O3",
-                "-fno-math-errno",
-                "-fno-trapping-math",
-                "-fno-signed-zeros",
-                if (use_f32) USE_FLOAT32_FLAG else "",
-            },
-            .language = .cpp,
-        });
-    }
-
-    rnbo_mod.addIncludePath(source_dir.path(b, "rnbo"));
-    rnbo_mod.addIncludePath(source_dir.path(b, "rnbo/common"));
-}
-
-fn buildLoader(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, use_f32: bool) void {
-    const module = b.addModule("rnbo_loader", .{
-        .target = target,
-        .optimize = optimize,
-        .root_source_file = b.path("src/loader.zig"),
-    });
-
-    const options = b.addOptions();
-    options.addOption(bool, "use_f32", use_f32);
-    module.addOptions("options", options);
 }
