@@ -24,6 +24,8 @@ pub const Functions = extern struct {
     objectProcessInterleaved: *const fn (obj: *Object, input: [*c]SampleType, input_channels: usize, output: [*c]SampleType, output_channels: usize, num_frames: usize) callconv(.c) c_int,
     objectSetPreset: *const fn (obj: *Object, preset: *Preset) callconv(.c) void,
     objectScheduleMidiEvent: *const fn (obj: *Object, time_ms: f64, port: usize, data: [*c]const u8, data_len: usize) callconv(.c) void,
+    objectTransportStart: *const fn (obj: *Object) callconv(.c) void,
+    objectTransportStop: *const fn (obj: *Object) callconv(.c) void,
 
     objectGetParameterIndexForId: *const fn (obj: *Object, id: [*c]const u8) callconv(.c) ParameterIndex,
     objectGetParameterValue: *const fn (obj: *Object, parameter_index: ParameterIndex) callconv(.c) Number,

@@ -109,6 +109,16 @@ void rnbo_objectSetPreset(CoreObjectRef obj, PresetRef preset) {
 	object->setPreset(std::move(p));
 }
 
+void rnbo_objectTransportStart(CoreObjectRef obj) {
+	RNBO::CoreObject *object = static_cast<RNBO::CoreObject *>(obj);
+	object->scheduleEvent(RNBO::TransportEvent(0, RNBO::TransportState::RUNNING));
+}
+
+void rnbo_objectTransportStop(CoreObjectRef obj) {
+	RNBO::CoreObject *object = static_cast<RNBO::CoreObject *>(obj);
+	object->scheduleEvent(RNBO::TransportEvent(0, RNBO::TransportState::STOPPED));
+}
+
 void rnbo_objectScheduleMidiEvent(CoreObjectRef obj, double time_ms, size_t port, const uint8_t *data, size_t data_len) {
 	RNBO::CoreObject *object = static_cast<RNBO::CoreObject *>(obj);
 	object->scheduleEvent(RNBO::MidiEvent(time_ms, port, data, data_len));

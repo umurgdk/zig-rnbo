@@ -380,6 +380,20 @@ const RnboObject = struct {
         library.functions.objectSetPreset(object, preset);
     }
 
+    pub fn transportStart(cenv: *jni.cEnv, this: jni.jobject) callconv(.c) void {
+        const env = jni.JNIEnv.warp(cenv);
+        const library = getLibrary(env, this) catch return;
+        const object = getObject(env, this) catch return;
+        library.functions.objectTransportStart(object);
+    }
+
+    pub fn transportStop(cenv: *jni.cEnv, this: jni.jobject) callconv(.c) void {
+        const env = jni.JNIEnv.warp(cenv);
+        const library = getLibrary(env, this) catch return;
+        const object = getObject(env, this) catch return;
+        library.functions.objectTransportStop(object);
+    }
+
     pub fn sendMessage(cenv: *jni.cEnv, this: jni.jobject, inport: jni.jstring) callconv(.c) void {
         const env = jni.JNIEnv.warp(cenv);
         const library = getLibrary(env, this) catch return;
