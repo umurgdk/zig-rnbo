@@ -1,56 +1,10 @@
-#include <__config>
+#include <cstdint>
 #define VECTOR_LEN 128
 
 #include "RNBO.h"
 
 // extern "C" RNBO::PatcherFactoryFunctionPtr GetPatcherFactoryFunction(RNBO::PlatformInterface* platformInterface);
 
-extern "C" {
-typedef struct {
-	void *userinfo;
-	void (*onBangEvent)(void *userinfo, void *object, uint32_t tag);
-	void (*onNumberEvent)(void *userinfo, void *object, uint32_t tag, RNBO::number value);
-	void (*onError)(void *userinfo, void *object);
-} EventHandlerCallbacks;
-}
-
-class PassthroughEventHandler : RNBO::EventHandler {
-public:
-	PassthroughEventHandler(EventHandlerCallbacks callbacks, RNBO::CoreObject *object) : m_callbacks(callbacks), m_object(object) {
-		m_event_interface = object->createParameterInterface(
-			RNBO::ParameterEventInterface::Type::MultiProducer,
-			this
-		);
-	}
-
-	EventHandlerCallbacks m_callbacks;
-
-private:
-	RNBO::CoreObject      *m_object;
-	RNBO::ParameterEventInterfaceUniquePtr m_event_interface;
-
-	void eventsAvailable() override {
-		drainEvents();
-	}
-
-	void handleMessageEvent(const RNBO::MessageEvent &event) override {
-		try {
-			switch (event.getType()) {
-				case RNBO::MessageEvent::Type::Number:
-					m_callbacks.onNumberEvent(m_callbacks.userinfo, m_object, event.getTag(), event.getNumValue());
-					break;
-
-				case RNBO::MessageEvent::Type::Bang:
-					m_callbacks.onBangEvent(m_callbacks.userinfo, m_object, event.getTag());
-					break;
-				default:
-				break;
-			}
-		} catch (...) {
-			m_callbacks.onError(m_callbacks.userinfo, m_object);
-		}
-	}
-};
 
 extern "C" {
 
@@ -272,7 +226,29 @@ PresetRef rnbo_presetListPresetWithName(PresetListRef preset_list, const char *n
 /// EventHandler
 ///
 
-EventHandlerRef rnbo_newEventHandler(CoreObjectRef obj, EventHandlerCallbacks callbacks) {
+typedef struct {
+	RNBO::number *values;
+	size_t count;
+} List;
+
+typedef union {
+	RNBO::number number;
+	List list;
+} MessageEventPayload;
+
+typedef struct {
+	uint32_t tag;
+	int type;
+	double timestamp_ms;
+	MessageEventPayload payload;
+} MessageEvent;
+
+typedef struct {
+	void *userinfo;
+	void (*handler)(void *userinfo, void *object, MessageEvent event);
+} EventHandlerCallback;
+
+EventHandlerRef rnbo_newEventHandler(CoreObjectRef obj, EventHandlerCallback callback) {
 	RNBO::CoreObject *object = static_cast<RNBO::CoreObject *>(obj);
 	PassthroughEventHandler *event_handler = new PassthroughEventHandler(callbacks, object);
 	return event_handler;
@@ -283,9 +259,53 @@ void rnbo_destroyEventHandler(EventHandlerRef event_handler_ptr) {
 	delete event_handler;
 }
 
-EventHandlerCallbacks rnbo_eventHandlerGetCallbacks(EventHandlerRef event_handler_ptr) {
+EventHandlerCallback rnbo_eventHandlerGetCallbacks(EventHandlerRef event_handler_ptr) {
 	PassthroughEventHandler *event_handler = static_cast<PassthroughEventHandler *>(event_handler_ptr);
 	return event_handler->m_callbacks;
 }
 
 }
+
+class PassthroughEventHandler : RNBO::EventHandler {
+public:
+	PassthroughEventHandler(EventHandlerCallback callbacks, RNBO::CoreObject *object) : m_callbacks(callbacks), m_object(object) {
+		m_event_interface = object->createParameterInterface(
+			RNBO::ParameterEventInterface::Type::MultiProducer,
+			this
+		);
+	}
+
+	EventHandlerCallback m_callbacks;
+
+private:
+	RNBO::CoreObject      *m_object;
+	RNBO::ParameterEventInterfaceUniquePtr m_event_interface;
+
+	void eventsAvailable() override {
+		drainEvents();
+	}
+
+	void handleMessageEvent(const RNBO::MessageEvent &event) override {
+		MessageEvent ev{};
+		ev.tag = event.getTag();
+		ev.type = event.getType();
+		ev.timestamp_ms = event.getTime();
+
+		switch (event.getType()) {
+			case RNBO::MessageEvent::Type::Number:
+				ev.payload.number = event.getNumValue();
+				break;
+
+			case RNBO::MessageEvent::Type::List:
+				auto list = event.getListValue();
+				ev.payload.list.values = list.inner();
+				ev.payload.list.count = list.length;
+				break;
+
+			default:
+				break;
+		}
+
+		m_callbacks.handler(m_callbacks.userinfo, m_object, ev);
+	}
+};

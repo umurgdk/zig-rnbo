@@ -44,9 +44,9 @@ pub const Functions = extern struct {
     presetListPresetAtIndex: *const fn (self: *PresetList, index: usize) callconv(.c) *Preset,
     presetListPresetWithName: *const fn (self: *PresetList, name: [*c]const u8) callconv(.c) *Preset,
 
-    newEventHandler: *const fn (obj: *Object, callbacks: EventHandlerCallbacks) callconv(.c) ?*EventHandler,
+    newEventHandler: *const fn (obj: *Object, callbacks: EventHandlerCallback) callconv(.c) ?*EventHandler,
     destroyEventHandler: *const fn (event_handler: *EventHandler) callconv(.c) void,
-    eventHandlerGetCallbacks: *const fn (event_handler: *EventHandler) callconv(.c) EventHandlerCallbacks,
+    eventHandlerGetCallbacks: *const fn (event_handler: *EventHandler) callconv(.c) EventHandlerCallback,
 };
 
 pub fn loadLibrary(path: [:0]const u8) !Library {
@@ -72,10 +72,29 @@ pub const Object = opaque {};
 pub const Preset = opaque {};
 pub const PresetList = opaque {};
 pub const EventHandler = opaque {};
+pub const List = extern struct {
+    data: [*c]Number,
+    count: usize,
+};
 
-pub const EventHandlerCallbacks = extern struct {
+pub const MessageEvent = extern struct {
+    tag: u32,
+    type: Type,
+    timestamp_ms: f64,
+    payload: extern union {
+        number: Number,
+        list: List,
+    },
+
+    pub const Type = enum(c_int) {
+        invalid = -1,
+        number = 0,
+        list = 1,
+        bang = 2,
+    };
+};
+
+pub const EventHandlerCallback = extern struct {
     userinfo: *anyopaque,
-    onBangEvent: *const fn (userinfo: *anyopaque, object: *Object, tag: u32) callconv(.c) void,
-    onNumberEvent: *const fn (userinfo: *anyopaque, object: *Object, tag: u32, value: Number) callconv(.c) void,
-    onError: *const fn (userinfo: *anyopaque, object: *Object) callconv(.c) void,
+    handler: *const fn (userinfo: *anyopaque, object: *Object, event: MessageEvent) callconv(.c) void,
 };
