@@ -247,23 +247,6 @@ typedef struct {
 	void *userinfo;
 	void (*handler)(void *userinfo, void *object, MessageEvent event);
 } EventHandlerCallback;
-
-EventHandlerRef rnbo_newEventHandler(CoreObjectRef obj, EventHandlerCallback callback) {
-	RNBO::CoreObject *object = static_cast<RNBO::CoreObject *>(obj);
-	PassthroughEventHandler *event_handler = new PassthroughEventHandler(callbacks, object);
-	return event_handler;
-}
-
-void rnbo_destroyEventHandler(EventHandlerRef event_handler_ptr) {
-	PassthroughEventHandler *event_handler = static_cast<PassthroughEventHandler *>(event_handler_ptr);
-	delete event_handler;
-}
-
-EventHandlerCallback rnbo_eventHandlerGetCallbacks(EventHandlerRef event_handler_ptr) {
-	PassthroughEventHandler *event_handler = static_cast<PassthroughEventHandler *>(event_handler_ptr);
-	return event_handler->m_callbacks;
-}
-
 }
 
 class PassthroughEventHandler : RNBO::EventHandler {
@@ -292,15 +275,17 @@ private:
 		ev.timestamp_ms = event.getTime();
 
 		switch (event.getType()) {
-			case RNBO::MessageEvent::Type::Number:
+			case RNBO::MessageEvent::Type::Number: {
 				ev.payload.number = event.getNumValue();
 				break;
+			}
 
-			case RNBO::MessageEvent::Type::List:
+			case RNBO::MessageEvent::Type::List: {
 				auto list = event.getListValue();
-				ev.payload.list.values = list.inner();
-				ev.payload.list.count = list.length;
+				ev.payload.list.values = list->inner();
+				ev.payload.list.count = list->length;
 				break;
+			}
 
 			default:
 				break;
@@ -309,3 +294,24 @@ private:
 		m_callbacks.handler(m_callbacks.userinfo, m_object, ev);
 	}
 };
+
+extern "C" {
+
+EventHandlerRef rnbo_newEventHandler(CoreObjectRef obj, EventHandlerCallback callback) {
+	RNBO::CoreObject *object = static_cast<RNBO::CoreObject *>(obj);
+	PassthroughEventHandler *event_handler = new PassthroughEventHandler(callback, object);
+	return event_handler;
+}
+
+void rnbo_destroyEventHandler(EventHandlerRef event_handler_ptr) {
+	PassthroughEventHandler *event_handler = static_cast<PassthroughEventHandler *>(event_handler_ptr);
+	delete event_handler;
+}
+
+EventHandlerCallback rnbo_eventHandlerGetCallbacks(EventHandlerRef event_handler_ptr) {
+	PassthroughEventHandler *event_handler = static_cast<PassthroughEventHandler *>(event_handler_ptr);
+	return event_handler->m_callbacks;
+}
+
+}
+
