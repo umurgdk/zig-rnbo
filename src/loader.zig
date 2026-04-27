@@ -50,7 +50,10 @@ pub const Functions = extern struct {
 };
 
 pub fn loadLibrary(path: [:0]const u8) !Library {
-    var handle = try std.DynLib.openZ(path);
+    var handle = std.DynLib.openZ(path) catch |err| {
+        std.log.err("dlopen failed for {s}: {s}", .{ path, std.c.dlerror() orelse "<no dlerror>" });
+        return err;
+    };
 
     var functions: Functions = undefined;
     const lookup_fields = std.meta.fields(Functions);

@@ -36,7 +36,6 @@ typedef void * PresetRef;
 typedef void * EventHandlerRef;
 
 CoreObjectRef _Nullable rnbo_objectNew() {
-	// auto patcher_interface = GetPatcherFactoryFunction(RNBO::Platform::get())();
 	RNBO::CoreObject *object = new RNBO::CoreObject();
 	return (CoreObjectRef)object;
 }
